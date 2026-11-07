@@ -76,7 +76,7 @@ Session titles are generated automatically from at most the first 4,096 characte
 After a successful response, Xarab may generate a suggested next message from up to the last 4,096 characters of the response. Press Tab in an empty composer to insert it; edit it before sending if desired. This tool-free utility uses the tier 1 worker, which may send the excerpt to a remote provider and consume usage. Set `"automaticSuggestions": false` in `~/.xarab/config.json` to disable it.
 
 
-Project profiles use `.agents/agents/<name>.md`; this is a Xarab format, not a cross-tool standard. Malformed or oversized profiles are reported and skipped without blocking valid profiles or the built-in agent. Directory-level discovery errors still prevent task invocation. Profiles are rediscovered on invocation. See the [task-runner design and profile format](docs/general-purpose-task-runner.md).
+Project profiles use `.agents/agents/<name>.md`; this is a Xarab format, not a cross-tool standard. Malformed or oversized profiles are reported and skipped without blocking valid profiles or the built-in agent. Directory-level discovery errors still prevent task invocation. Profiles are rediscovered on invocation. See the [task agent guide](docs/task-agents.md) for the profile format and usage.
 
 ## Develop and evaluate
 

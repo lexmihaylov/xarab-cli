@@ -3,7 +3,11 @@
 **Type:** `decision`
 **Status:** `in-progress`
 
-Place JSON at `<workspace>/.xarab/command-policy.json`. Only that exact workspace root is consulted. The file must be a regular file, not resolve through symlinks, and be at most 16 KiB.
+This page is both a guide to the behavior currently implemented in the source and a record of an in-progress decision. The rules, activation, and coverage below describe current behavior; the improvements in [Limitations and remaining work](#limitations-and-remaining-work) are not implemented. The status does not mean that the current checks are a complete security boundary.
+
+## Configuration
+
+Optionally place JSON at `<workspace>/.xarab/command-policy.json`. Only that exact workspace root is consulted; Xarab does not search parent directories. The file must be a regular file, not resolve through symlinks, and be at most 16 KiB. The following is an example, not a default policy:
 
 ```json
 {
@@ -26,9 +30,9 @@ Place JSON at `<workspace>/.xarab/command-policy.json`. Only that exact workspac
 
 ## Rules
 
-Sections are optional maps. Commands match exact bare executable names, not subcommands or executable paths. File rules match exact workspace-relative paths; folder rules include all descendants. Paths use `/`, with no glob syntax, `..`, or absolute paths. Use `.` to match the workspace folder. Strictest wins: **deny > verify > allow**. An allow exception cannot override a denied parent folder.
+`version` must be `1`; the three rule sections are optional maps, and unknown top-level keys are invalid. Each rule's value is `allow`, `verify`, or `deny`. Commands match exact bare executable names, not subcommands or executable paths. File rules match exact workspace-relative paths; folder rules include all descendants. Paths use `/`, with no glob syntax, `..`, or absolute paths. Use `.` to match the workspace folder. Strictest wins: **deny > verify > allow**. An allow exception cannot override a denied parent folder.
 
-An explicit command allow bypasses model assessment for a simple command. Groups of simple commands retain assessment for unmatched members and all members must be authorized before the group executes. A bounded quote-aware tokenizer preserves quoted separators. Expansions, comments, redirections and unsupported shell constructs retain assessment of the original command rather than qualifying for automatic approval. Command path tokens and simple redirection targets also contribute matching path rules. Verification requests explicit consent; unavailable or cancelled verification prevents the action. Existing tool workspace and symlink protections still apply even to allowed paths.
+For native file and image tools, `deny` blocks the operation, `verify` asks for consent, and `allow` adds no policy restriction; unmatched targets retain existing tool behavior. For commands, `deny` blocks execution and `verify` requests consent. An explicit command allow bypasses model assessment for a simple command. Groups of simple commands retain assessment for unmatched members and all members must be authorized before the group executes. A bounded quote-aware tokenizer preserves quoted separators. Expansions, comments, redirections and unsupported shell constructs retain assessment of the original command rather than qualifying for automatic approval. Command path tokens and simple redirection targets also contribute matching path rules. Verification requests explicit consent; unavailable or cancelled verification prevents the action. Existing tool workspace and symlink protections still apply even to allowed paths.
 
 ## Activation
 
