@@ -5,6 +5,7 @@ import {
   resolveWorkspaceFile,
 } from "../../../utils/workspace-file-utils.js";
 import { formatChangePreview } from "../../../utils/change-diff.js";
+import { formatMismatchDiagnostics } from "./mismatch-diagnostics.js";
 
 export function createInsertTool({ workspace = process.cwd(), onEvent = () => {}, position }) {
   if (position !== "before" && position !== "after")
@@ -13,7 +14,7 @@ export function createInsertTool({ workspace = process.cwd(), onEvent = () => {}
   const direction = position === "before" ? "before" : "after";
 
   return {
-    description: `Insert text ${direction} an exact anchor in an existing workspace file. Provide path, anchor, and content. The anchor must match exactly once: read the file first, copy it exactly (including tabs, spaces, and trailing whitespace), and include 2-3 distinctive surrounding lines. For anchors at a line boundary, the tool adds a missing newline between inserted content and the anchor; use explicit newlines for inline insertions. Generic tags such as </div>, </span>, and </p> are usually not unique. Verify the anchor is unique before inserting. The tool shows a bounded diff in the UI. Paths must stay within the workspace; symlinks and non-text files are rejected.`,
+    description: `Insert text ${direction} the entire anchor in an existing workspace file. Read the file first and copy a short, distinctive anchor exactly, including whitespace; add context only if needed for uniqueness. The anchor must match exactly once. Context is part of the anchor: insertion occurs at its ${position === "before" ? "start" : "end"}, not at a line inside it. At a line boundary the tool adds a missing newline between content and anchor; for inline insertion supply any needed newlines explicitly. Matching tolerates CRLF/LF differences, but content is inserted as supplied. On mismatch, reread and use the diagnostics; no fuzzy insertion is applied. Paths must stay within the workspace; symlinks and non-text files are rejected.`,
     params: {
       type: "object",
       properties: {
@@ -21,9 +22,9 @@ export function createInsertTool({ workspace = process.cwd(), onEvent = () => {}
         anchor: {
           type: "string",
           description:
-            "Exact non-empty text to insert relative to. Copy it exactly, include 2-3 unique surrounding lines, and ensure it occurs exactly once.",
+            "Exact non-empty anchor, including whitespace. Start with a short unique excerpt; add context if needed. Insertion is relative to the entire anchor.",
         },
-        content: { type: "string", description: `Text to insert ${direction} the anchor.` },
+        content: { type: "string", description: `Text to insert ${direction} the entire anchor.` },
       },
       required: ["path", "anchor", "content"],
     },
@@ -52,9 +53,9 @@ export function createInsertTool({ workspace = process.cwd(), onEvent = () => {}
         }
         const occurrences = matches.length;
         if (occurrences === 0)
-          return `Error: anchor was not found in ${displayPath}; reread the file and copy the exact text.`;
+          return `Error: anchor was not found in ${displayPath}; reread the file and copy the exact text.${formatMismatchDiagnostics(original, anchor, matches)}`;
         if (occurrences !== 1) {
-          return `Error: anchor must match exactly once in ${displayPath} (found ${occurrences}); include more surrounding text.`;
+          return `Error: anchor must match exactly once in ${displayPath} (found ${occurrences}); include more surrounding text.${formatMismatchDiagnostics(original, anchor, matches)}`;
         }
 
         const match = matches[0];

@@ -101,7 +101,7 @@ test("builds the coding-agent system prompt with ancestor instructions", async (
       prompt,
       /Treat available tools as the primary way to inspect, change, and verify the workspace/,
     );
-    assert.match(prompt, /Generate code iteratively, never in one large write or insertion/);
+    assert.match(prompt, /Generate code iteratively: inspect first, make focused changes/);
     assert.match(prompt, /Choose tools by task/);
     assert.match(prompt, /Shell suits tests, builds, Git, scripts, and batch work/);
     assert.match(prompt, /file tools suit searches, focused reads, and edits/);
@@ -134,7 +134,7 @@ test("builds a system prompt without project instruction files", () => {
   assert.match(prompt, /tool-using coding assistant/);
   assert.match(prompt, /Available tools\n- None are currently registered/);
   assert.match(prompt, /Treat available tools as the primary way/);
-  assert.match(prompt, /Generate code iteratively, never in one large write or insertion/);
+  assert.match(prompt, /Generate code iteratively: inspect first, make focused changes/);
   assert.match(prompt, /Choose tools by task/);
   assert.match(
     prompt,

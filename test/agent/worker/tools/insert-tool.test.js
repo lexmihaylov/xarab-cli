@@ -125,12 +125,32 @@ test("requires an exact unique anchor and rejects unsafe paths", async () => {
   });
 });
 
+test("multiline anchors insert at the boundary of the entire anchor", async () => {
+  await withWorkspace(async (workspace) => {
+    const target = path.join(workspace, "file.txt");
+    for (const position of ["before", "after"]) {
+      await writeFile(target, "start\nfirst\nsecond\nend\n");
+      const tool = createInsertTool({ workspace, position });
+      assert.match(
+        await tool.handler({ path: "file.txt", anchor: "first\nsecond", content: "added" }),
+        /Inserted/,
+      );
+      assert.equal(
+        await readFile(target, "utf8"),
+        position === "before"
+          ? "start\nadded\nfirst\nsecond\nend\n"
+          : "start\nfirst\nsecond\nadded\nend\n",
+      );
+    }
+  });
+});
+
 test("documents exact-anchor insertion", async () => {
   await withWorkspace(async (workspace) => {
     for (const position of ["before", "after"]) {
       const tool = createInsertTool({ workspace, position });
       assert.match(tool.description, /anchor must match exactly once/);
-      assert.match(tool.description, /2-3 distinctive surrounding lines/);
+      assert.match(tool.description, /entire anchor/);
       assert.match(tool.description, /adds a missing newline/);
       assert.deepEqual(tool.params.required, ["path", "anchor", "content"]);
     }

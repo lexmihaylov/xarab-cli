@@ -5,11 +5,12 @@ import {
   resolveWorkspaceFile,
 } from "../../../utils/workspace-file-utils.js";
 import { formatChangePreview } from "../../../utils/change-diff.js";
+import { formatMismatchDiagnostics } from "./mismatch-diagnostics.js";
 
 export function createEditTool({ workspace = process.cwd(), onEvent = () => {} } = {}) {
   return {
     description:
-      "Replace text in an existing workspace file. Provide path, oldString, and newString. oldString must match exactly once unless replaceAll is true. Use this for focused edits: read the file first, copy the target exactly (including tabs, spaces, and trailing whitespace), and include 2-3 distinctive surrounding lines. Generic tags such as </div>, </span>, and </p> are usually not unique. Verify the exact match is unique before editing. The tool applies the edit only when the requested text is found and shows a bounded diff in the UI. Paths must stay within the workspace; symlinks and non-text files are rejected.",
+      "Replace text in an existing workspace file. Read the file first; copy a short, distinctive oldString exactly, including whitespace. Add context only if needed for uniqueness. oldString must match exactly once unless replaceAll is true; use replaceAll only when every occurrence should change. newString replaces the entire oldString, including any context. Matching tolerates CRLF/LF differences, but newString is inserted as supplied. On mismatch, reread and use the diagnostics; no fuzzy edit is applied. Paths must stay within the workspace; symlinks and non-text files are rejected.",
     params: {
       type: "object",
       properties: {
@@ -17,9 +18,12 @@ export function createEditTool({ workspace = process.cwd(), onEvent = () => {} }
         oldString: {
           type: "string",
           description:
-            "Exact text to replace. Copy it exactly, including whitespace, and include 2-3 unique surrounding lines; it must match once unless replaceAll is true.",
+            "Exact text to replace, including whitespace. Start with a short unique excerpt and add context if needed; it must match once unless replaceAll is true.",
         },
-        newString: { type: "string", description: "Replacement text." },
+        newString: {
+          type: "string",
+          description: "Replacement for the entire oldString, including any context.",
+        },
         replaceAll: {
           type: "boolean",
           description: "When true, replace every exact occurrence of oldString; defaults to false.",
@@ -54,9 +58,9 @@ export function createEditTool({ workspace = process.cwd(), onEvent = () => {} }
         }
         const occurrences = matches.length;
         if (occurrences === 0)
-          return `Error: oldString was not found in ${displayPath}; reread the file and provide the exact text.`;
+          return `Error: oldString was not found in ${displayPath}; reread the file and provide the exact text.${formatMismatchDiagnostics(original, oldString, matches)}`;
         if (!replaceAll && occurrences !== 1) {
-          return `Error: oldString must match exactly once in ${displayPath} (found ${occurrences}); add more surrounding text or set replaceAll: true.`;
+          return `Error: oldString must match exactly once in ${displayPath} (found ${occurrences}); add more surrounding text or set replaceAll: true.${formatMismatchDiagnostics(original, oldString, matches)}`;
         }
         const selected = replaceAll ? matches : matches.slice(0, 1);
         let updated = original;

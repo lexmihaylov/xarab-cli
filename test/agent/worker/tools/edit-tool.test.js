@@ -4,6 +4,7 @@ import { mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { createEditTool } from "../../../../src/agent/worker/tools/edit-tool.js";
+import { createInsertTool } from "../../../../src/agent/worker/tools/insert-tool.js";
 import { findText } from "../../../../src/utils/workspace-file-utils.js";
 
 test("normalized ranges count supplementary characters as UTF-16 units", () => {
@@ -127,11 +128,56 @@ test("reports absent text and rejects unsafe targets", async () => {
   });
 });
 
+test("shared mismatch diagnostics are bounded and allow exact recovery", async () => {
+  await withWorkspace(async (workspace) => {
+    const target = path.join(workspace, "file.txt");
+    const original = "  target\n".repeat(20);
+    const events = [];
+    const edit = createEditTool({ workspace, onEvent: (event) => events.push(event) });
+    const insert = createInsertTool({
+      workspace,
+      position: "before",
+      onEvent: (event) => events.push(event),
+    });
+    await writeFile(target, original);
+    for (const [tool, args] of [
+      [edit, { oldString: " target", newString: "changed" }],
+      [insert, { anchor: " target", content: "changed" }],
+    ]) {
+      // A substring is an exact match; use a whitespace mismatch instead.
+      const mismatch =
+        tool === edit ? { ...args, oldString: "   target" } : { ...args, anchor: "   target" };
+      const result = await tool.handler({ path: "file.txt", ...mismatch });
+      assert.match(result, /Possible whitespace-only first-line candidates/);
+      assert.match(result, /line 1:/);
+      assert.doesNotMatch(result, /line 4:/);
+      assert.equal(await readFile(target, "utf8"), original);
+    }
+    const duplicate = await edit.handler({
+      path: "file.txt",
+      oldString: "target",
+      newString: "changed",
+    });
+    assert.match(duplicate, /Match locations: line 1, line 2/);
+    assert.doesNotMatch(duplicate, /line 6/);
+    assert.equal(events.length, 0);
+    await writeFile(target, "before\n  target\nafter\n");
+    assert.match(
+      await edit.handler({ path: "file.txt", oldString: "  target", newString: "changed" }),
+      /Edited/,
+    );
+    assert.match(
+      await insert.handler({ path: "file.txt", anchor: "changed", content: "inserted" }),
+      /Inserted/,
+    );
+    assert.equal(await readFile(target, "utf8"), "before\ninserted\nchanged\nafter\n");
+  });
+});
 test("documents OpenCode-style exact-string edit semantics", async () => {
   await withWorkspace(async (workspace) => {
     const tool = createEditTool({ workspace });
     assert.match(tool.description, /oldString must match exactly once unless replaceAll is true/);
-    assert.match(tool.description, /2-3 distinctive surrounding lines/);
+    assert.match(tool.description, /entire oldString/);
     assert.deepEqual(tool.params.required, ["path", "oldString", "newString"]);
   });
 });
