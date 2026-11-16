@@ -1,4 +1,5 @@
 import { withProviderInactivity } from "./provider-inactivity.js";
+import { toolCallBatches } from "./tool-call-batches.js";
 
 const URL = "https://openrouter.ai/api/v1/chat/completions";
 
@@ -304,13 +305,9 @@ export function createOpenRouterWorkerAdapter({
         }
         return { role: "tool", tool_call_id: call.id, content: String(output ?? "") };
       };
-      for (let index = 0; index < toolCalls.length;) {
-        const start = index++;
-        if (toolCalls[start].function.name === "task") {
-          while (index < toolCalls.length && toolCalls[index].function.name === "task") index++;
-        }
-        // Only adjacent tasks overlap; Promise.all retains model call order.
-        const results = await Promise.all(toolCalls.slice(start, index).map(executeCall));
+      for (const batch of toolCallBatches(toolCalls, (call) => call.function.name)) {
+        // Promise.all retains model call order even when tools finish out of order.
+        const results = await Promise.all(batch.map(executeCall));
         if (signal?.aborted) throw signal.reason ?? new Error("Request cancelled.");
         for (const result of results) {
           if (result.handoff) return result;

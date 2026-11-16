@@ -10,9 +10,24 @@ import {
 } from "../src/agent/worker/instructions.js";
 
 test("keeps the core system prompt concise", () => {
-  assert.ok(BASE_SYSTEM_PROMPT.length < 4_500);
+  assert.ok(BASE_SYSTEM_PROMPT.length < 5_000);
 });
 
+test("prefers direct work and safe parallelism", () => {
+  const prompt = buildSystemPrompt({ workspace: "/workspace" });
+  assert.match(prompt, /Work directly by default/);
+  assert.match(
+    prompt,
+    /Delegate bounded work only when the benefit outweighs coordination overhead/,
+  );
+  assert.match(prompt, /prefer parallel independent subtasks without overlapping edits/);
+  for (const delegated of [false, true]) {
+    const workerPrompt = buildSystemPrompt({ workspace: "/workspace", delegated });
+    assert.match(workerPrompt, /Issue independent tool calls in parallel when practical/);
+    assert.match(workerPrompt, /keep dependent or conflicting operations sequential/);
+    assert.match(workerPrompt, /Concurrency depends on the provider and runtime/);
+  }
+});
 test("requires research and explicit approval before consequential implementation", () => {
   const prompt = buildSystemPrompt({ workspace: "/workspace" });
   assert.match(prompt, /do not begin making changes immediately/);

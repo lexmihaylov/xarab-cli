@@ -1,5 +1,6 @@
 import WebSocket from "ws";
 import { withProviderInactivity } from "./provider-inactivity.js";
+import { toolCallBatches } from "./tool-call-batches.js";
 
 const CODEX_BASE_URL = "https://chatgpt.com/backend-api/codex";
 const RESPONSES_URL = `${CODEX_BASE_URL}/responses`;
@@ -267,12 +268,9 @@ export function createOpenAIResponsesWorkerAdapter({
             output: result.output,
           };
         };
-        for (let index = 0; index < functionCalls.length;) {
-          const start = index++;
-          if (functionCalls[start].name === "task") {
-            while (index < functionCalls.length && functionCalls[index].name === "task") index++;
-          }
-          const results = await Promise.all(functionCalls.slice(start, index).map(executeCall));
+        for (const batch of toolCallBatches(functionCalls, (call) => call.name)) {
+          // Promise.all retains model call order even when tools finish out of order.
+          const results = await Promise.all(batch.map(executeCall));
           if (signal?.aborted) throw abortError();
           for (const result of results) {
             if (result.handoff) return result;

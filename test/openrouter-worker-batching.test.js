@@ -117,7 +117,7 @@ function fixture(names) {
   return { adapter, requests };
 }
 
-test("batches only consecutive tasks, preserving start and result order across barriers", async () => {
+test("batches consecutive tasks separately from reads, preserving order across barriers", async () => {
   const { adapter, requests } = fixture(["task", "task", "read_file", "read_file", "task"]);
   const gates = Array.from({ length: 5 }, deferred);
   const started = Array.from({ length: 5 }, deferred);
@@ -142,12 +142,12 @@ test("batches only consecutive tasks, preserving start and result order across b
   await Promise.resolve();
   assert.deepEqual(starts, [0, 1]);
   gates[0].resolve();
-  await started[2].promise;
-  assert.deepEqual(starts, [0, 1, 2]);
-  gates[2].resolve();
   await started[3].promise;
   assert.deepEqual(starts, [0, 1, 2, 3]);
   gates[3].resolve();
+  await Promise.resolve();
+  assert.deepEqual(starts, [0, 1, 2, 3]);
+  gates[2].resolve();
   await started[4].promise;
   gates[4].resolve();
   await run;
