@@ -94,6 +94,25 @@ test("line-boundary insertions add missing newlines using the file convention", 
   });
 });
 
+test("counts earlier CRLF-normalized anchors before later exact LF anchors", async () => {
+  await withWorkspace(async (workspace) => {
+    const target = path.join(workspace, "mixed.txt");
+    const original = "first\r\nsecond\nfirst\nsecond";
+    await writeFile(target, original);
+    const tool = createInsertTool({ workspace, position: "before" });
+
+    assert.match(
+      await tool.handler({
+        path: "mixed.txt",
+        anchor: "first\nsecond",
+        content: "inserted",
+      }),
+      /must match exactly once.*found 2/s,
+    );
+    assert.equal(await readFile(target, "utf8"), original);
+  });
+});
+
 test("requires an exact unique anchor and rejects unsafe paths", async () => {
   await withWorkspace(async (workspace) => {
     const outside = path.join(path.dirname(workspace), `${path.basename(workspace)}-outside.txt`);

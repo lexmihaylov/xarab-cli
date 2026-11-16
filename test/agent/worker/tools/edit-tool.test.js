@@ -74,6 +74,44 @@ test("matches exact-read LF excerpts against CRLF files and preserves remaining 
   });
 });
 
+test("counts earlier CRLF-normalized matches before later exact LF matches", async () => {
+  await withWorkspace(async (workspace) => {
+    const target = path.join(workspace, "mixed.txt");
+    const original = "first\r\nsecond\nfirst\nsecond";
+    await writeFile(target, original);
+    const tool = createEditTool({ workspace });
+
+    assert.match(
+      await tool.handler({
+        path: "mixed.txt",
+        oldString: "first\nsecond",
+        newString: "changed",
+      }),
+      /must match exactly once.*found 2/s,
+    );
+    assert.equal(await readFile(target, "utf8"), original);
+  });
+});
+
+test("replaceAll edits every occurrence across mixed line endings", async () => {
+  await withWorkspace(async (workspace) => {
+    const target = path.join(workspace, "mixed.txt");
+    await writeFile(target, "first\r\nsecond\nfirst\nsecond");
+    const tool = createEditTool({ workspace });
+
+    assert.match(
+      await tool.handler({
+        path: "mixed.txt",
+        oldString: "first\nsecond",
+        newString: "changed",
+        replaceAll: true,
+      }),
+      /2 replacements/,
+    );
+    assert.equal(await readFile(target, "utf8"), "changed\nchanged");
+  });
+});
+
 test("requires a unique match unless replaceAll is true", async () => {
   await withWorkspace(async (workspace) => {
     const target = path.join(workspace, "file.txt");

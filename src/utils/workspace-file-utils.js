@@ -71,9 +71,6 @@ export async function readWorkspaceText(target, displayPath) {
 // Tool output commonly normalizes CRLF to LF. Match that representation while
 // retaining the file's original bytes when calculating the replacement range.
 export function findText(source, requested) {
-  const direct = source.indexOf(requested);
-  if (direct !== -1) return { index: direct, length: requested.length };
-
   const normalizedSource = source.replace(/\r\n/g, "\n");
   const normalizedRequested = requested.replace(/\r\n/g, "\n");
   const normalizedIndex = normalizedSource.indexOf(normalizedRequested);
