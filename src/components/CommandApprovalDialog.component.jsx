@@ -60,8 +60,8 @@ export function CommandApprovalDialog({ commandApproval, onAnswer }) {
       finish();
     }
   });
-  const width = Math.min(84, Math.max(1, size.width - 4));
-  const height = Math.min(28, size.height - 4);
+  const width = Math.min(104, Math.max(1, size.width - 4));
+  const height = Math.min(36, size.height - 4);
   if (width < 44 || height < 17)
     return (
       <Modal
@@ -108,8 +108,10 @@ export function CommandApprovalDialog({ commandApproval, onAnswer }) {
           <text fg={colors.label} height={1} flexShrink={0}>
             COMMAND · controls escaped visibly
           </text>
-          <scrollbox focused={focus === "command"} flexGrow={1} minHeight={0}>
-            <text fg={colors.text}>{visibleCommand(commandApproval.command)}</text>
+          <scrollbox focused={focus === "command"} flexGrow={1} minHeight={0} overflow="scroll">
+            <text fg={colors.text} wrapMode="char">
+              {visibleCommand(commandApproval.command)}
+            </text>
           </scrollbox>
         </box>
         <box

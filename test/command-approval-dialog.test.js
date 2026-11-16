@@ -111,6 +111,26 @@ test("long multiline commands remain scrollable with actions visible", async () 
   }
 });
 
+test("long single-line scripts wrap in the command review pane", async () => {
+  const command = `node -e '${'console.log("review me");'.repeat(30)}'`;
+  const view = await testRender(
+    React.createElement(CommandApprovalDialog, {
+      commandApproval: { ...commandApproval, command },
+      onAnswer() {},
+    }),
+    { width: 80, height: 24 },
+  );
+  try {
+    await view.flush();
+    const frame = view.captureCharFrame();
+    assert.match(frame, /node -e/);
+    assert.match(frame, /review me/);
+    assert.match(frame, /\[ Approve \]/);
+  } finally {
+    await act(async () => view.dispose());
+  }
+});
+
 test("command display distinguishes literal escape sequences from controls", () => {
   assert.equal(visibleCommand("a\r\u001b\u202eb\n"), "a\\u000d\\u001b\\u202eb\n");
   assert.notEqual(visibleCommand("\\u001b"), visibleCommand("\u001b"));
