@@ -146,7 +146,7 @@ test("executes tool calls and returns a follow-up response", async () => {
   assert.equal(requests[1].messages.at(-1).content, "content");
   assert.deepEqual(chunks, ["Done"]);
   assert.deepEqual(
-    events.map((event) => event.type),
+    events.filter((event) => event.type !== "openrouter_history").map((event) => event.type),
     ["tool_call", "tool_result"],
   );
 });
@@ -237,4 +237,54 @@ test("rejects malformed historical tool pairs before sending a request", async (
     await assert.rejects(adapter.run({ model: "model", input }), /historical tool/);
   }
   assert.equal(fetched, false);
+});
+
+test("forwards effort and preserves opaque reasoning blocks through tools and replay", async () => {
+  const requests = [];
+  const snapshots = [];
+  const blocks = [
+    { type: "reasoning.encrypted", index: 0, data: "signed-one", format: "opaque-v1" },
+    { index: 0, data: "signed-two", unknown: true, signature: "signature" },
+    { type: "reasoning.text", index: 1, text: "first", id: "other" },
+    { index: 1, text: " second", format: "native" },
+  ];
+  const adapter = createOpenRouterWorkerAdapter({
+    getApiKey: () => "key",
+    fetchImpl: async (_, options) => {
+      requests.push(JSON.parse(options.body));
+      if (requests.length === 1)
+        return stream([
+          { choices: [{ delta: { reasoning_details: [blocks[0], blocks[2]] } }] },
+          {
+            choices: [
+              {
+                delta: {
+                  reasoning_details: [blocks[1], blocks[3]],
+                  tool_calls: [{ index: 0, id: "c", function: { name: "read", arguments: "{}" } }],
+                },
+              },
+            ],
+          },
+        ]);
+      return stream([{ choices: [{ delta: { content: "done" } }] }]);
+    },
+  });
+  await adapter.run({
+    model: "m",
+    effort: "high",
+    input: "go",
+    tools: { read: { handler: async () => "result" } },
+    onEvent: (event) => {
+      if (event.type === "openrouter_history") snapshots.push(event.messages);
+    },
+  });
+  assert.deepEqual(requests[1].reasoning, { effort: "high" });
+  const assembled = [
+    { ...blocks[0], data: "signed-onesigned-two", unknown: true, signature: "signature" },
+    { ...blocks[2], text: "first second", format: "native" },
+  ];
+  assert.deepEqual(requests[1].messages.find((m) => m.tool_calls)?.reasoning_details, assembled);
+  await adapter.run({ model: "m", effort: "default", input: snapshots.at(-1) });
+  assert.equal(requests[2].reasoning, undefined);
+  assert.deepEqual(requests[2].messages[0].reasoning_details, assembled);
 });

@@ -18,7 +18,12 @@ export function createOpenRouterModelManager({ getApiKey, fetchImpl = fetch } = 
             model.id &&
             model.architecture?.output_modalities?.includes("text"),
         )
-        .map((model) => ({ provider: "openrouter", id: model.id, name: model.name || model.id }));
+        .map((model) => ({
+          provider: "openrouter",
+          id: model.id,
+          name: model.name || model.id,
+          ...(model.reasoning ? { reasoning: model.reasoning } : {}),
+        }));
     },
   };
 }

@@ -1062,3 +1062,31 @@ for (const transport of ["HTTP", "WebSocket"]) {
     assert.equal(executions, 0);
   });
 }
+
+for (const [effort, expected] of [
+  [undefined, "low"],
+  ["default", undefined],
+  ["high", "high"],
+  ["none", "none"],
+]) {
+  test(`OpenAI worker maps effort ${effort ?? "legacy"}`, async () => {
+    let body;
+    const adapter = createOpenAIResponsesWorkerAdapter({
+      getCredentials: async () => ({ access_token: "token", account_id: "account" }),
+      fetchImpl: async (_, options) => {
+        body = JSON.parse(options.body);
+        return streamedResponse([
+          {
+            type: "response.completed",
+            response: {
+              output: [{ type: "message", content: [{ type: "output_text", text: "done" }] }],
+            },
+          },
+        ]);
+      },
+    });
+    await adapter.run({ model: "m", effort, input: "hello" });
+    assert.equal(body.reasoning.effort, expected);
+    assert.equal(body.reasoning.summary, "auto");
+  });
+}

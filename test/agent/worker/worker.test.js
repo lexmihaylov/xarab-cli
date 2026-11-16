@@ -473,3 +473,33 @@ test("worker rejects an unconfigured tier", async () => {
 
   await assert.rejects(() => worker.run({ tier: 2 }), /Tier 2 is not configured/);
 });
+
+test("same-model effort variants forward effort and permit tier adjustment", async () => {
+  const calls = [];
+  const worker = createWorker({
+    configStore: {
+      getTierWorker: (tier) => ({
+        provider: "openai",
+        model: "m",
+        effort: tier === 1 ? "low" : "high",
+      }),
+    },
+    openAIAdapterFactory: () => ({
+      run: async (request) => {
+        calls.push(request);
+      },
+    }),
+    localAdapterFactory: () => {
+      throw new Error("wrong provider");
+    },
+  });
+  try {
+    await worker.run({ tier: 1, input: "hello", onTierAdjustment: async () => {} });
+    assert.equal(calls[0].effort, "low");
+    assert.equal(typeof calls[0].tools.tier_adjustment.handler, "function");
+    await worker.complete({ tier: 2, input: "hello" });
+    assert.equal(calls[1].effort, "high");
+  } finally {
+    await worker.dispose();
+  }
+});

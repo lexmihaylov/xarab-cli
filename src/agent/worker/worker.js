@@ -89,11 +89,12 @@ export function createWorker({
           : `Tier ${tier} is not configured; choose a worker model in /route.`,
       );
     }
-    onAssignment?.({ tier, provider: assignment.provider, model: assignment.model });
+    onAssignment?.({ tier, ...assignment });
     return (await getAdapter(assignment)).run({
       ...request,
       input,
       model: assignment.model,
+      effort: assignment.effort,
       ...(instructions ? { instructions } : {}),
       ...(tools ? { tools } : {}),
     });
@@ -106,7 +107,9 @@ export function createWorker({
       return (
         candidate !== tier &&
         validateAssignment(alternative) &&
-        (alternative.provider !== current?.provider || alternative.model !== current?.model)
+        (alternative.provider !== current?.provider ||
+          alternative.model !== current?.model ||
+          alternative.effort !== current?.effort)
       );
     });
     return (
@@ -127,7 +130,7 @@ export function createWorker({
     delegated = false,
   }) {
     return {
-      input: buildWorkerHistory(history, input),
+      input: buildWorkerHistory(history, input, getAssignment(tier)?.provider),
       instructions: systemPromptFor({
         workspace,
         instructionFiles,
@@ -252,7 +255,7 @@ function historicalToolOutput(part) {
   return sections.join("\n");
 }
 
-export function buildWorkerHistory(messages = [], currentInput) {
+export function buildWorkerHistory(messages = [], currentInput, provider) {
   const history = [];
   const source = messages ?? [];
   const userIndices = [];
@@ -268,6 +271,18 @@ export function buildWorkerHistory(messages = [], currentInput) {
       continue;
     }
     if (message?.type !== "agent") continue;
+    if (provider === "openrouter" && index >= toolBoundary && message.openrouterMessages?.length) {
+      history.push(...message.openrouterMessages);
+      if (Number.isInteger(message.openrouterTextLength)) {
+        const visible = (message.parts ?? [])
+          .filter((part) => part.type === "text")
+          .map((part) => part.text ?? "")
+          .join("");
+        const remainder = visible.slice(message.openrouterTextLength);
+        if (remainder) history.push({ role: "assistant", content: remainder });
+      }
+      continue;
+    }
     const parts = Array.isArray(message.parts) && message.parts.length ? message.parts : null;
     if (!parts) {
       if (message.message?.trim()) history.push({ role: "assistant", content: message.message });

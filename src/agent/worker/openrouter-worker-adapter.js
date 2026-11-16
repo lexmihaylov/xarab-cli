@@ -56,6 +56,7 @@ export function createOpenRouterWorkerAdapter({
 }) {
   async function run({
     model,
+    effort,
     instructions,
     input,
     tools = {},
@@ -91,10 +92,13 @@ export function createOpenRouterWorkerAdapter({
     // A breakpoint at the end of the stable tool list covers the entire list
     // without consuming one marker per tool (providers may limit breakpoints).
     if (definitions.length) definitions.at(-1).cache_control = { type: "ephemeral" };
+    const turnStart = messages.length;
+    const publishHistory = () =>
+      onEvent({ type: "openrouter_history", messages: structuredClone(messages.slice(turnStart)) });
     let usedTool = false;
     while (true) {
       if (signal?.aborted) throw signal.reason ?? new Error("Request cancelled.");
-      const { text, calls } = await withProviderInactivity({
+      const { text, calls, reasoningDetails } = await withProviderInactivity({
         signal,
         timeoutMs: inactivityTimeoutMs,
         maxRetries: inactivityRetries,
@@ -107,6 +111,7 @@ export function createOpenRouterWorkerAdapter({
             headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
             body: JSON.stringify({
               model,
+              ...(effort && effort !== "default" ? { reasoning: { effort } } : {}),
               messages,
               stream: true,
               ...(definitions.length ? { tools: definitions } : {}),
@@ -143,6 +148,8 @@ export function createOpenRouterWorkerAdapter({
           let buffer = "";
           let text = "";
           const calls = new Map();
+          const reasoningDetails = [];
+          const reasoningIndices = new Map();
           let finished = false;
           const consume = (block) => {
             const data = block
@@ -177,6 +184,32 @@ export function createOpenRouterWorkerAdapter({
               if (onTextDelta) onTextDelta(delta.content);
               else onText(delta.content);
             }
+            // Indexed details are streamed fragments of the same block. Only
+            // payload fields concatenate; signatures and other metadata are opaque.
+            for (const detail of delta?.reasoning_details ?? []) {
+              const key =
+                detail.index != null
+                  ? `index:${detail.index}`
+                  : detail.id
+                    ? `id:${detail.id}`
+                    : null;
+              const position = key == null ? undefined : reasoningIndices.get(key);
+              if (position === undefined) {
+                if (key != null) reasoningIndices.set(key, reasoningDetails.length);
+                reasoningDetails.push({ ...detail });
+              } else {
+                const current = reasoningDetails[position];
+                for (const [field, value] of Object.entries(detail)) {
+                  if (
+                    ["text", "summary", "data"].includes(field) &&
+                    typeof value === "string" &&
+                    typeof current[field] === "string"
+                  )
+                    current[field] += value;
+                  else current[field] = value;
+                }
+              }
+            }
             for (const call of delta?.tool_calls ?? []) {
               const current = calls.get(call.index) ?? {
                 id: "",
@@ -205,9 +238,10 @@ export function createOpenRouterWorkerAdapter({
             reader.releaseLock();
           }
           if (!finished) throw new Error("OpenRouter stream ended unexpectedly.");
-          return { text, calls };
+          return { text, calls, reasoningDetails };
         },
       });
+      const reasoning = reasoningDetails.length ? { reasoning_details: reasoningDetails } : {};
       if (!calls.size) {
         if (
           /\bto=functions?\.[a-zA-Z0-9_-]+/i.test(text) ||
@@ -217,13 +251,20 @@ export function createOpenRouterWorkerAdapter({
             "OpenRouter returned a textual tool call instead of a structured function call.",
           );
         if (usedTool && !text) throw new Error("OpenRouter returned no response after tool calls.");
+        messages.push({ role: "assistant", content: text, ...reasoning });
+        publishHistory();
         return { output: [{ type: "message", content: [{ type: "output_text", text }] }] };
       }
       usedTool = true;
       const toolCalls = [...calls.entries()]
         .sort(([a], [b]) => a - b)
         .map(([, call]) => ({ ...call, type: "function" }));
-      messages.push({ role: "assistant", content: text || null, tool_calls: toolCalls });
+      messages.push({
+        role: "assistant",
+        content: text || null,
+        tool_calls: toolCalls,
+        ...reasoning,
+      });
       const executeCall = async (call) => {
         if (signal?.aborted) throw signal.reason ?? new Error("Request cancelled.");
         const tool = tools[call.function.name];
@@ -276,6 +317,7 @@ export function createOpenRouterWorkerAdapter({
           messages.push(result);
         }
       }
+      publishHistory();
     }
   }
   return { run };

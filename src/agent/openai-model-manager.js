@@ -35,7 +35,17 @@ export function createOpenAIModelManager({ getCredentials, fetchImpl = fetch }) 
       .filter((model) => model.slug || model.model_slug || model.id)
       .map((model) => {
         const id = model.slug ?? model.model_slug ?? model.id;
-        return { provider: "openai", id, name: model.display_name || model.name || id };
+        return {
+          provider: "openai",
+          id,
+          name: model.display_name || model.name || id,
+          ...(model.supported_reasoning_levels
+            ? { supported_reasoning_levels: model.supported_reasoning_levels }
+            : {}),
+          ...(model.default_reasoning_level != null
+            ? { default_reasoning_level: model.default_reasoning_level }
+            : {}),
+        };
       });
   }
   return { listModels };

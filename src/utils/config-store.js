@@ -18,6 +18,9 @@ function normalizeTierWorkers(value) {
       continue;
     workers[tier] = {
       provider: worker.provider,
+      ...(worker.provider !== "local" && typeof worker.effort === "string" && worker.effort.trim()
+        ? { effort: worker.effort.trim() }
+        : {}),
       ...(typeof worker.model === "string" && worker.model.trim()
         ? {
             model:
@@ -209,6 +212,11 @@ export function createConfigStore(configPath, routingConfigPath = configPath) {
         ...config.tierWorkers,
         [tier]: {
           provider: worker.provider,
+          ...(worker.provider !== "local" &&
+          typeof worker.effort === "string" &&
+          worker.effort.trim()
+            ? { effort: worker.effort.trim() }
+            : {}),
           model:
             worker.provider === "local" ? path.resolve(worker.model.trim()) : worker.model.trim(),
         },

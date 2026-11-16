@@ -573,6 +573,14 @@ export function createAssistantController({
         input: requestText,
         signal: abortController.signal,
         onEvent(event) {
+          if (event.type === "openrouter_history") {
+            assistantMessage.openrouterMessages = event.messages;
+            assistantMessage.openrouterTextLength = assistantMessage.parts
+              .filter((part) => part.type === "text")
+              .reduce((length, part) => length + (part.text?.length ?? 0), 0);
+            sessionChanged();
+            return;
+          }
           if (event.type === "provider_retry") {
             settlePreviews();
             sessionChanged();

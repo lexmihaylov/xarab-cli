@@ -1,3 +1,4 @@
+import { workerVariants, effortLabel, workerKey } from "../utils/worker-effort.js";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useKeyboard, useTerminalDimensions } from "@opentui/react";
 import { getTheme } from "../utils/theme-engine.js";
@@ -103,27 +104,30 @@ export function ModelChooser({
     return options;
   }, [classifier, models]);
   const workerOptions = useMemo(() => {
-    const options = models.map((model) => ({
-      name: `${providerLabel(model.provider)} · ${model.name}`,
-      description: model.id,
-      value: { provider: model.provider, model: model.id },
-    }));
-    const known = new Set(models.map((model) => `${model.provider}:${model.id}`));
+    const options = models.flatMap((model) =>
+      workerVariants(model).map((value) => ({
+        name: `${providerLabel(model.provider)} · ${model.name}${value.provider === "local" ? "" : ` · ${effortLabel(value)}`}`,
+        description: model.id,
+        value,
+      })),
+    );
+    const known = new Set(options.map((option) => workerKey(option.value)));
     for (const worker of Object.values(tierWorkers)) {
-      if (
-        worker?.provider !== "local" &&
-        worker?.model &&
-        !known.has(`${worker.provider}:${worker.model}`)
-      ) {
+      if (worker?.provider !== "local" && worker?.model && !known.has(workerKey(worker))) {
         options.push({
-          name: `${providerLabel(worker.provider)} · ${worker.model}`,
+          name: `${providerLabel(worker.provider)} · ${worker.model} · ${effortLabel(worker)}`,
           description: worker.model,
           value: worker,
         });
-        known.add(`${worker.provider}:${worker.model}`);
+        known.add(workerKey(worker));
       }
     }
-    if (defaultOpenAIModel && !known.has(`openai:${defaultOpenAIModel}`))
+    if (
+      defaultOpenAIModel &&
+      !options.some(
+        (option) => option.value.provider === "openai" && option.value.model === defaultOpenAIModel,
+      )
+    )
       options.push({
         name: `OpenAI · ${defaultOpenAIModel}`,
         description: defaultOpenAIModel,
@@ -169,10 +173,12 @@ export function ModelChooser({
   useEffect(() => {
     const index = visibleWorkers.findIndex(
       (option) =>
-        option.value.provider === configuredWorker?.provider && option.value.model === worker,
+        option.value.provider === configuredWorker?.provider &&
+        option.value.model === worker &&
+        option.value.effort === configuredWorker?.effort,
     );
     setWorkerIndex(Math.max(0, index));
-  }, [worker, workerQuery, models, tier]);
+  }, [worker, configuredWorker?.effort, workerQuery, models, tier]);
   const usableWidth = Math.max(1, terminalWidth - 4);
   // Keep all three sections visible at practical widths. The worker section is
   // useful context for the selected tier, so it should not disappear on a
@@ -422,7 +428,7 @@ export function ModelChooser({
                       bold={selected || configured}
                       active={selected && !confirmDelete}
                     >
-                      {`${selected ? "› " : "· "}Tier ${number} · ${tierWorkers[number]?.model || defaultOpenAIModel || "Not configured"}`}
+                      {`${selected ? "› " : "· "}Tier ${number} · ${tierWorkers[number]?.model || defaultOpenAIModel || "Not configured"} · ${effortLabel(tierWorkers[number])}`}
                     </MarqueeText>
                   </box>
                 );
@@ -463,10 +469,11 @@ export function ModelChooser({
                     const selected = activeControl === 2 && index === workerIndex;
                     const configured =
                       option.value.provider === configuredWorker?.provider &&
-                      option.value.model === worker;
+                      option.value.model === worker &&
+                      option.value.effort === configuredWorker?.effort;
                     return (
                       <box
-                        key={`${option.value.provider}:${option.value.model}`}
+                        key={workerKey(option.value)}
                         flexDirection="column"
                         flexShrink={0}
                         backgroundColor={selected ? colors.selected : undefined}

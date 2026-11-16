@@ -14,6 +14,7 @@ export function createOpenAIResponsesWorkerAdapter({
 }) {
   async function run({
     model,
+    effort,
     instructions,
     input,
     tools = {},
@@ -67,7 +68,7 @@ export function createOpenAIResponsesWorkerAdapter({
           tools: apiTools,
           parallel_tool_calls: true,
           reasoning: {
-            effort: "low",
+            ...(effort === "default" ? {} : { effort: effort ?? "low" }),
             summary: "auto",
           },
           store: false,
