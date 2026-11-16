@@ -184,6 +184,23 @@ test("keeps OpenAI streamed text and tool activity in event order in one assista
   );
 });
 
+test("a completed turn clears and saves a restored interrupted flag", async (t) => {
+  const { create, configure, store } = await setup(t);
+  const controller = await create();
+  await configure(controller);
+  await controller.submit("Prior turn");
+  const id = controller.getState().currentSession.id;
+  const record = await store.load(id);
+  record.interrupted = true;
+  await store.save(record);
+
+  await controller.startNewSession();
+  await controller.restoreSession(id);
+  await controller.submit("Finish recovery");
+
+  assert.equal((await store.load(id)).interrupted, false);
+});
+
 test("legacy local-model metadata is ignored when restoring a session", async (t) => {
   const { root, create, configure, store } = await setup(t);
   const controller = await create();

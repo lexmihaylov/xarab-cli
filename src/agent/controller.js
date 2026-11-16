@@ -832,6 +832,14 @@ export function createAssistantController({
       completed = true;
     } finally {
       turnRunning = false;
+      if (completed && !turnInterrupted && !isShuttingDown) {
+        sessionController.setLastTurnInterrupted(false);
+        sessionController.sessionChanged();
+        await sessionController.saveCurrentSession().catch((error) => {
+          sessionController.setSessionError(`Session could not be saved: ${error.message}`);
+          notify();
+        });
+      }
       notify();
       if (completed && !turnInterrupted && !isShuttingDown) await drainQueue(sessionId);
     }
