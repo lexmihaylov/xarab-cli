@@ -1,16 +1,5 @@
 const MODELS_URL = new URL("https://chatgpt.com/backend-api/codex/models");
-MODELS_URL.searchParams.set("client_version", "0.0.0");
-const KNOWN_CODEX_MODELS = [
-  { id: "gpt-6-astra", name: "GPT-6 Astra" },
-  { id: "gpt-6-astra-fast", name: "GPT-6 Astra Fast" },
-  { id: "gpt-6-luna", name: "GPT-6 Luna" },
-  { id: "gpt-6-luna-fast", name: "GPT-6 Luna Fast" },
-  { id: "gpt-6-sol", name: "GPT-6 Sol" },
-  { id: "gpt-6-sol-fast", name: "GPT-6 Sol Fast" },
-  { id: "gpt-6.1-sol", name: "GPT-6.1 Sol" },
-  { id: "gpt-6.1-sol-fast", name: "GPT-6.1 Sol Fast" },
-  { id: "gpt-6.1-terra", name: "GPT-6.1 Terra" },
-];
+MODELS_URL.searchParams.set("client_version", "0.169.0");
 
 export function createOpenAIModelManager({ getCredentials, fetchImpl = fetch }) {
   async function listModels({ signal } = {}) {
@@ -42,18 +31,12 @@ export function createOpenAIModelManager({ getCredentials, fetchImpl = fetch }) 
     }
     const body = await response.json();
     const entries = Array.isArray(body) ? body : (body.models ?? []);
-    const models = new Map(
-      entries
-        .filter((model) => model.slug || model.model_slug || model.id)
-        .map((model) => {
-          const id = model.slug ?? model.model_slug ?? model.id;
-          return [id, { provider: "openai", id, name: model.display_name || model.name || id }];
-        }),
-    );
-    for (const model of KNOWN_CODEX_MODELS) {
-      if (!models.has(model.id)) models.set(model.id, { provider: "openai", ...model });
-    }
-    return [...models.values()];
+    return entries
+      .filter((model) => model.slug || model.model_slug || model.id)
+      .map((model) => {
+        const id = model.slug ?? model.model_slug ?? model.id;
+        return { provider: "openai", id, name: model.display_name || model.name || id };
+      });
   }
   return { listModels };
 }

@@ -308,7 +308,7 @@ test("empty WebSocket responses retry without replaying tools", async () => {
   assert.equal(tools, 0);
 });
 
-test("lists account models plus known Codex models", async () => {
+test("lists models returned by the Codex catalog", async () => {
   const requests = [];
   const adapter = createOpenAIModelManager({
     getCredentials: async () => ({ access_token: "token-secret", account_id: "account-1" }),
@@ -325,28 +325,15 @@ test("lists account models plus known Codex models", async () => {
   });
 
   const models = await adapter.listModels();
-  assert.deepEqual(models.slice(0, 3), [
+  assert.deepEqual(models, [
     { provider: "openai", id: "model-a", name: "Model A" },
     { provider: "openai", id: "model-b", name: "Model B" },
     { provider: "openai", id: "gpt-6-sol", name: "Account GPT-6 Sol" },
   ]);
-  assert.deepEqual(
-    models.slice(3).map((model) => model.id),
-    [
-      "gpt-6-astra",
-      "gpt-6-astra-fast",
-      "gpt-6-luna",
-      "gpt-6-luna-fast",
-      "gpt-6-sol-fast",
-      "gpt-6.1-sol",
-      "gpt-6.1-sol-fast",
-      "gpt-6.1-terra",
-    ],
-  );
   assert.equal(requests[0].options.headers.authorization, "Bearer token-secret");
   assert.equal(
     requests[0].url,
-    "https://chatgpt.com/backend-api/codex/models?client_version=0.0.0",
+    "https://chatgpt.com/backend-api/codex/models?client_version=0.169.0",
   );
   assert.equal(requests[0].options.headers["chatgpt-account-id"], "account-1");
 });
