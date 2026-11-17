@@ -62,5 +62,21 @@ export function createProviderConnections({
       await onOpenRouterChanged();
     },
   };
-  return [openai, openrouter];
+  const tavily = {
+    id: "tavily",
+    name: "Tavily Search",
+    method: "apiKey",
+    async status() {
+      return configStore.getApiKey("tavily")
+        ? "API key saved · used by web search"
+        : "No API key saved";
+    },
+    async complete(input) {
+      await configStore.setApiKey("tavily", input);
+    },
+    async disconnect() {
+      await configStore.removeApiKey("tavily");
+    },
+  };
+  return [openai, openrouter, tavily];
 }

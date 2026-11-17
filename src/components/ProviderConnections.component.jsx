@@ -137,9 +137,16 @@ export function ProviderConnections({
               </text>
               {keyProvider ? (
                 <>
-                  <text fg={colors.hint}>
-                    Save an API key locally. Refresh /route to verify model access.
+                  <text fg={colors.hint} wrapMode="word">
+                    {provider.id === "tavily"
+                      ? "Save a Tavily key locally for web search."
+                      : "Save an API key locally. Refresh /route to verify model access."}
                   </text>
+                  {provider.id === "tavily" && (
+                    <text fg={colors.hint} wrapMode="word">
+                      TAVILY_API_KEY environment variable takes precedence.
+                    </text>
+                  )}
                   <text fg={colors.error}>
                     Key entry is visible in this terminal. Avoid screen sharing.
                   </text>

@@ -107,6 +107,27 @@ test("provider dialog starts sign-in and offers redirect input", async () => {
   }
 });
 
+test("Tavily panel explains its saved key and environment override", async () => {
+  const actions = [];
+  const view = await render(
+    React.createElement(ProviderConnections, {
+      providers: [{ id: "tavily", name: "Tavily Search", method: "apiKey" }],
+      statuses: { tavily: "No API key saved" },
+      onClose() {},
+      onAction: (...args) => actions.push(args),
+    }),
+  );
+  try {
+    await act(async () => view.mockInput.pressKey("tab"));
+    await view.flush();
+    const frame = view.captureCharFrame();
+    assert.match(frame, /TAVILY_API_KEY environment variable takes precedence/);
+    assert.match(frame, /Key entry is visible/);
+  } finally {
+    await view.dispose();
+  }
+});
+
 test("OpenRouter panel directs users to refresh routing models", async () => {
   const view = await render(
     React.createElement(ProviderConnections, {
