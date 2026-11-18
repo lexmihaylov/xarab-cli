@@ -95,7 +95,6 @@ export function App({
   onAnswerQuestions,
   onRemoveQueuedMessage,
   onStopGeneration,
-  onInterrupt,
   onDraftChange,
   onCloseModelModal,
   onOpenProviders,
@@ -240,7 +239,7 @@ export function App({
       return;
     }
 
-    if (key.ctrl && key.name === "c" && !copySelection(selectedText.current)) onInterrupt();
+    if (key.ctrl && key.name === "c") copySelection(selectedText.current);
   });
 
   return (

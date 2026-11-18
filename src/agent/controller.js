@@ -61,7 +61,6 @@ export function createAssistantController({
   let nextQueuedId = 0;
   let queuedMessages = [];
   let abortController;
-  let lastInterruptAt = 0;
   let messages = [];
   let currentAgentMessage;
   let suggestion = null;
@@ -867,29 +866,6 @@ export function createAssistantController({
     notify();
   }
 
-  function handleInterrupt() {
-    if (activeDownload) return modelManager.cancelModelDownload();
-    const now = Date.now();
-    if (now - lastInterruptAt <= 2000) return onQuit();
-    lastInterruptAt = now;
-    if (generating || isRouting || turnRunning) {
-      turnInterrupted = true;
-      abortController?.abort();
-      updateStatus("Stopping…");
-      addMessage({
-        type: "system",
-        message: "Generation stopping. Press Ctrl+C again to exit.",
-        severity: "warning",
-      });
-    } else {
-      addMessage({
-        type: "system",
-        message: "Press Ctrl+C again within 2 seconds to exit.",
-        severity: "warning",
-      });
-    }
-  }
-
   function stopGeneration() {
     if (!generating && !isRouting && !turnRunning) return;
     turnInterrupted = true;
@@ -1108,7 +1084,6 @@ export function createAssistantController({
     answerQuestions: questionRequest.respond,
     removeQueuedMessage,
     stopGeneration,
-    handleInterrupt,
     shutdown,
   };
 }

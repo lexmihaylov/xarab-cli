@@ -63,7 +63,6 @@ function renderApp(state) {
       onAnswerQuestions={controller.answerQuestions}
       onRemoveQueuedMessage={controller.removeQueuedMessage}
       onStopGeneration={controller.stopGeneration}
-      onInterrupt={controller.handleInterrupt}
       onDraftChange={controller.updateDraft}
       onCloseModelModal={controller.closeModelModal}
       onOpenProviders={controller.openProviderModal}

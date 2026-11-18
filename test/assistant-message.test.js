@@ -108,6 +108,34 @@ test("renders multiple fenced code blocks without exposing markdown markers", as
   }
 });
 
+test("Ctrl+C closes the renderer without invoking an interrupt handler", async () => {
+  let interrupts = 0;
+  const view = await testRender(
+    React.createElement(App, {
+      state: {
+        messages: [],
+        generating: false,
+        sessionDraft: { value: "", cursor: 0 },
+        status: "",
+      },
+      onSubmit() {},
+      onDraftChange() {},
+      onInterrupt() {
+        interrupts++;
+      },
+    }),
+    { width: 80, height: 24 },
+  );
+  try {
+    await view.flush();
+    await act(async () => view.mockInput.pressKey("c", { ctrl: true }));
+    await view.renderer.closed;
+    assert.equal(interrupts, 0);
+  } finally {
+    await view.dispose();
+  }
+});
+
 test("renders assistant markdown incrementally and finalizes the completed segment", async () => {
   let updateState;
   const initialText = "# Example\n\nFirst **bold** paragraph.\n\n";
@@ -128,7 +156,6 @@ test("renders assistant markdown incrementally and finalizes the completed segme
       state,
       onSubmit() {},
       onStopGeneration() {},
-      onInterrupt() {},
       onDraftChange() {},
     });
   }
