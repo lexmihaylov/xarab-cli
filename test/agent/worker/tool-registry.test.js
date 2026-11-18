@@ -6,6 +6,49 @@ import path from "node:path";
 import { createToolRegistry } from "../../../src/agent/worker/tool-registry.js";
 import { buildWorkerHistory } from "../../../src/agent/worker/worker.js";
 
+test("native tool events retain their call IDs across concurrent asynchronous calls", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "xarab-event-id-"));
+  try {
+    await Promise.all([
+      writeFile(path.join(directory, "first.txt"), "first"),
+      writeFile(path.join(directory, "second.txt"), "second"),
+    ]);
+    const events = [];
+    const messages = [];
+    const agentMessage = { type: "agent", parts: [] };
+    const { tools } = createToolRegistry({
+      workspace: directory,
+      configStore: { getApiKey: () => undefined },
+      onToolEvent: (name, event) => events.push({ name, ...event }),
+      getMessages: () => messages,
+      getCurrentAgentMessage: () => agentMessage,
+      sessionChanged: () => {},
+      notify: () => {},
+    });
+    const results = await Promise.all([
+      tools.read_file.handler({ path: "first.txt" }, { callId: "first-id" }),
+      tools.read_file.handler({ path: "second.txt" }, { callId: "second-id" }),
+      tools.read_file.handler({ path: "." }, { callId: "missing-id" }),
+    ]);
+    assert.deepEqual(
+      results.map((result) => result.ok),
+      [true, true, false],
+    );
+    assert.deepEqual(
+      events
+        .map(({ name, type, path: eventPath, callId }) => ({ name, type, path: eventPath, callId }))
+        .sort((a, b) => a.callId.localeCompare(b.callId)),
+      [
+        { name: "read_file", type: "read", path: "first.txt", callId: "first-id" },
+        { name: "read_file", type: "error", path: ".", callId: "missing-id" },
+        { name: "read_file", type: "read", path: "second.txt", callId: "second-id" },
+      ],
+    );
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("edit exceptions are stored and replayed as failures", async () => {
   const messages = [];
   const agentMessage = { type: "agent", parts: [] };

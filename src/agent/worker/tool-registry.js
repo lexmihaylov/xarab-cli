@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { createToolTimelineObserver, toolProgressLabel } from "./tool-timeline-observer.js";
 import { loadApprovedPolicy } from "../policy-consent.js";
 import { authorizeNativeTool, isPolicyTool } from "../native-policy.js";
@@ -35,50 +36,55 @@ export function createToolRegistry({
   sessionChanged,
   notify,
 }) {
+  const callContext = new AsyncLocalStorage();
+  const emitToolEvent = (name, event) => {
+    const callId = callContext.getStore();
+    onToolEvent(name, callId ? { ...event, callId } : event);
+  };
   const definitions = {
     ...externalTools,
     ...(taskTool ? { task: taskTool } : {}),
     ...(requestQuestions ? { ask_questions: createAskQuestionsTool({ requestQuestions }) } : {}),
     read_file: createReadFileTool({
       workspace,
-      onEvent: (event) => onToolEvent("read_file", event),
+      onEvent: (event) => emitToolEvent("read_file", event),
     }),
     list_files: createListFilesTool({
       workspace,
-      onEvent: (event) => onToolEvent("list_files", event),
+      onEvent: (event) => emitToolEvent("list_files", event),
     }),
     search_files: createSearchFilesTool({
       workspace,
-      onEvent: (event) => onToolEvent("search_files", event),
+      onEvent: (event) => emitToolEvent("search_files", event),
     }),
     search_content: createSearchContentTool({
       workspace,
-      onEvent: (event) => onToolEvent("search_content", event),
+      onEvent: (event) => emitToolEvent("search_content", event),
     }),
-    edit: createEditTool({ workspace, onEvent: (event) => onToolEvent("edit", event) }),
+    edit: createEditTool({ workspace, onEvent: (event) => emitToolEvent("edit", event) }),
     insert_before: createInsertTool({
       workspace,
       position: "before",
-      onEvent: (event) => onToolEvent("insert_before", event),
+      onEvent: (event) => emitToolEvent("insert_before", event),
     }),
     insert_after: createInsertTool({
       workspace,
       position: "after",
-      onEvent: (event) => onToolEvent("insert_after", event),
+      onEvent: (event) => emitToolEvent("insert_after", event),
     }),
-    write: createWriteTool({ workspace, onEvent: (event) => onToolEvent("write", event) }),
+    write: createWriteTool({ workspace, onEvent: (event) => emitToolEvent("write", event) }),
     websearch: createWebsearchTool({
       getApiKey: () => process.env.TAVILY_API_KEY?.trim() || configStore.getApiKey("tavily"),
-      onEvent: (event) => onToolEvent("websearch", event),
+      onEvent: (event) => emitToolEvent("websearch", event),
     }),
     webfetch: createWebfetchTool({
-      onEvent: (event) => onToolEvent("webfetch", event),
+      onEvent: (event) => emitToolEvent("webfetch", event),
     }),
     run_command: createShellTool({
       workspace,
       assessCommand,
       requestQuestions,
-      onEvent: (event) => onToolEvent("run_command", event),
+      onEvent: (event) => emitToolEvent("run_command", event),
     }),
     ...(skills.size ? { skill: createSkillTool(skills) } : {}),
     ...(imageCredentials
@@ -131,7 +137,9 @@ export function createToolRegistry({
               });
               if (!approved) throw new Error("Access denied or cancelled by workspace policy.");
             }
-            const rawResult = await definition.handler(params, { signal, callId });
+            const rawResult = await callContext.run(callId, () =>
+              definition.handler(params, { signal, callId }),
+            );
             const result = normalizeToolResult(rawResult);
             onDiagnosticEvent?.(name, { type: "finished", callId, ok: result.ok });
             observer.complete(part, name, params, result);

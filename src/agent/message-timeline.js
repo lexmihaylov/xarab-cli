@@ -68,6 +68,9 @@ export function createMessageTimeline({
       getCurrentAgentMessage()?.parts?.filter(
         (part) => part.type === "tool" && part.toolName === toolName && part.status === "running",
       ) ?? [];
+    if (typeof event.callId === "string" && event.callId) {
+      return active.find((part) => part.callId === event.callId);
+    }
     const field = event.query !== undefined ? "query" : event.path !== undefined ? "path" : null;
     const match =
       field &&
@@ -87,7 +90,7 @@ export function createMessageTimeline({
           message: `${toolName} denied: ${event.path} is outside the workspace.`,
           severity: "warning",
         });
-      else
+      else if (event.type === "error")
         addMessage({
           type: "system",
           message: `${toolName} failed for ${event.path}: ${event.message}`,
