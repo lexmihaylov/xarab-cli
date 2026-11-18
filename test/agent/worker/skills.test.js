@@ -34,7 +34,17 @@ test("discovers nearest valid skills, then global skills; loads only on demand",
     await skill(home, "global-task", sample("global-task"));
     await skill(project, "invalid", sample("different"));
     const skills = await discoverSkills(child, home);
-    assert.deepEqual([...skills.keys()], ["review", "global-task"]);
+    assert.deepEqual(
+      [...skills.keys()],
+      [
+        "review",
+        "global-task",
+        "skill-creator",
+        "xarab-command-policy",
+        "xarab-configuration",
+        "xarab-mcp",
+      ],
+    );
     const tool = createSkillTool(skills);
     assert.match(tool.description, /Child review/);
     assert.doesNotMatch(tool.description, /Follow this workflow/);
@@ -53,5 +63,7 @@ test("rejects symlinked SKILL.md and large files", async () =>
       path.join(root, ".agents", "skills", "large", "SKILL.md"),
       path.join(root, ".agents", "skills", "linked", "SKILL.md"),
     );
-    assert.equal((await discoverSkills(root, home)).size, 0);
+    const skills = await discoverSkills(root, home);
+    assert.equal(skills.has("large"), false);
+    assert.equal(skills.has("linked"), false);
   }));

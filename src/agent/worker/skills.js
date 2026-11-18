@@ -1,7 +1,9 @@
 import { readdir, readFile, realpath, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
+const BUILTIN_SKILLS = fileURLToPath(new URL("../../../skills/", import.meta.url));
 const NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const MAX_SKILL_BYTES = 64 * 1024;
 
@@ -39,6 +41,7 @@ export async function discoverSkills(workspace = process.cwd(), home = os.homedi
     current = parent;
   }
   directories.push(path.join(home, ".agents", "skills"));
+  directories.push(BUILTIN_SKILLS);
   const skills = new Map();
   for (const directory of directories) {
     let entries;

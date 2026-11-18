@@ -2,6 +2,8 @@
 
 Xarab discovers agent skills at `.agents/skills/<name>/SKILL.md` in the workspace directory and its parents, and at `~/.agents/skills/<name>/SKILL.md`. The parent search stops at the first directory containing a `.git` directory, or at the filesystem root if none is found. A `.git` file, as used by linked Git worktrees, does not stop the search. The nearest valid project skill wins if names collide; global skills are fallback definitions. Discovery happens for each worker request.
 
+Xarab also ships built-in skills, including `skill-creator` for creating and maintaining skills and `xarab-configuration` for configuring providers, routing, settings, credentials, and MCP servers, `xarab-command-policy` for workspace command and file policies, and `xarab-mcp` for MCP server configuration, authentication, approvals, and security. Built-ins are available in every workspace and are the lowest-priority fallback: valid project and global skills override a built-in with the same name. The built-in skill files are bundled with Xarab rather than installed into your personal skills directory.
+
 A skill needs YAML-style frontmatter with single-line `name` and `description` fields. Names must match their directory and use lowercase letters, digits, and single hyphens (maximum 64 characters); descriptions are limited to 1024 characters. Invalid or oversized (over 64 KiB) definitions are ignored.
 
 ```markdown

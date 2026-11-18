@@ -1,0 +1,13 @@
+---
+name: xarab-command-policy
+description: Explain, configure, and troubleshoot Xarab workspace command and file policies.
+---
+
+When helping with a Xarab command policy:
+1. Consult the current Xarab command policy documentation when available. Its decision is in progress; distinguish implemented behavior from proposed improvements. Ask about the user's goals and obtain approval before changing a policy.
+2. The optional JSON policy lives at `<workspace>/.xarab/command-policy.json`, only at the exact workspace root. It must be a regular file, not resolve through symlinks, and be at most 16 KiB. Preserve unrelated rules when editing.
+3. Set `version` to 1. Optional `commands`, `files`, and `folders` maps accept `allow`, `verify`, or `deny`; unknown top-level keys are invalid. Commands match exact bare executable names, not subcommands or executable paths. File paths are exact workspace-relative paths; folder rules include descendants. Use forward slashes, no globs, absolute paths, or `..`; `.` denotes the workspace. The strictest applicable rule wins: deny, then verify, then allow. An allow cannot override a denied parent.
+4. Xarab asks to activate new or changed policy contents. Denied or unavailable activation ignores the policy and retains existing behavior; its deny rules are not enforced. Missing or invalid policies also do not enforce rules. Decisions are cached in process memory by workspace and exact contents, not persisted. Cancelled or temporarily unavailable activation may be retried. Verification requires explicit consent; cancellation or unavailability prevents the verified action.
+5. Native file and image tools and `run_command` have policy checks. Directory operations conservatively apply the strictest descendant rule to the whole operation. Unmatched targets retain existing behavior. Command parsing and path matching are best effort, and unsupported shell constructs retain assessment rather than qualifying for automatic approval. Existing workspace and symlink protections still apply.
+6. This is an authorization convenience, not a sandbox. Direct user `!` commands, MCP/external tools, skills, and web tools are outside policy coverage. Allowed commands can access denied files indirectly; scripts, child processes, generated paths and filesystem races can conceal effects. Do not promise that policies isolate untrusted code or protect secrets from arbitrary commands.
+7. Validate policy syntax and applicable rules, explain activation and limitations, and test only with the user's approval. Do not bypass existing approval controls or claim untested behavior.
