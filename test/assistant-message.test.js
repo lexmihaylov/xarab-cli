@@ -12,7 +12,7 @@ async function renderMessage(props) {
     width: 60,
     height: 12,
   });
-  await view.flush();
+  await act(async () => view.flush());
   return view;
 }
 
@@ -53,13 +53,13 @@ test("does not render a successful file listing output body", async () => {
     }),
     { width: 60, height: 12 },
   );
-  await view.flush();
+  await act(async () => view.flush());
   try {
     const frame = view.captureCharFrame();
     assert.match(frame, /Listing files/);
     assert.doesNotMatch(frame, /Files in|secret-file/);
   } finally {
-    await view.dispose();
+    await act(async () => view.dispose());
   }
 });
 
@@ -72,7 +72,7 @@ test("renders fenced agent response content as markdown", async () => {
     assert.match(frame, /hello/);
     assert.doesNotMatch(frame, /```text|```/);
   } finally {
-    await view.dispose();
+    await act(async () => view.dispose());
   }
 });
 
@@ -96,7 +96,7 @@ test("renders multiple fenced code blocks without exposing markdown markers", as
     React.createElement(AssistantMessage, { message: { message: content } }),
     { width: 80, height: 24 },
   );
-  await view.flush();
+  await act(async () => view.flush());
   try {
     const frame = view.captureCharFrame();
     assert.match(frame, /npm config delete dns --location=user/);
@@ -104,7 +104,7 @@ test("renders multiple fenced code blocks without exposing markdown markers", as
     assert.match(frame, /return `Hello, \$\{name\}!`;/);
     assert.doesNotMatch(frame, /```(?:sh|js)?/);
   } finally {
-    await view.dispose();
+    await act(async () => view.dispose());
   }
 });
 
@@ -127,12 +127,12 @@ test("Ctrl+C closes the renderer without invoking an interrupt handler", async (
     { width: 80, height: 24 },
   );
   try {
-    await view.flush();
+    await act(async () => view.flush());
     await act(async () => view.mockInput.pressKey("c", { ctrl: true }));
     await view.renderer.closed;
     assert.equal(interrupts, 0);
   } finally {
-    await view.dispose();
+    await act(async () => view.dispose());
   }
 });
 
@@ -177,24 +177,24 @@ test("renders assistant markdown incrementally and finalizes the completed segme
   }
 
   const view = await testRender(React.createElement(Harness), { width: 80, height: 24 });
-  await view.flush();
+  await act(async () => view.flush());
   try {
     assert.match(view.captureCharFrame(), /Example/);
     assert.doesNotMatch(view.captureCharFrame(), /# Example/);
     assert.match(view.captureCharFrame(), /First bold paragraph\./);
 
-    updateResponse(streamedText, true);
-    await view.flush();
+    await act(async () => updateResponse(streamedText, true));
+    await act(async () => view.flush());
     let frame = view.captureCharFrame();
     assert.match(frame, /A second \*unfinished/);
 
-    updateResponse(completedText, false);
-    await view.flush();
+    await act(async () => updateResponse(completedText, false));
+    await act(async () => view.flush());
     frame = view.captureCharFrame();
     assert.match(frame, /A second unfinished paragraph\./);
     assert.doesNotMatch(frame, /\*unfinished\*/);
   } finally {
-    await view.dispose();
+    await act(async () => view.dispose());
   }
 });
 
@@ -213,10 +213,10 @@ test("top-level streaming markdown conceals a heading while the following paragr
   const view = await testRender(React.createElement(Harness), { width: 80, height: 12 });
   try {
     for (const content of ["# Heading\n\n", "# Heading\n\nA", "# Heading\n\nA paragraph grows."]) {
-      act(() => update(content));
-      await view.renderOnce();
+      await act(async () => update(content));
+      await act(async () => view.renderOnce());
       const immediate = view.captureCharFrame();
-      await view.flush();
+      await act(async () => view.flush());
       const settled = view.captureCharFrame();
       for (const frame of [immediate, settled]) {
         assert.match(frame, /Heading/);
@@ -224,7 +224,7 @@ test("top-level streaming markdown conceals a heading while the following paragr
       }
     }
   } finally {
-    await view.dispose();
+    await act(async () => view.dispose());
   }
 });
 
@@ -233,15 +233,73 @@ test("renders the generating state without response text", async () => {
   try {
     assert.match(view.captureCharFrame(), /Generating…/);
   } finally {
-    await view.dispose();
+    await act(async () => view.dispose());
   }
 });
 
-test("renders the welcome artwork without passing an array to a text node", async () => {
+test("renders the pixel wordmark and help section", async () => {
   const view = await testRender(React.createElement(Welcome), { width: 80, height: 24 });
+  await act(async () => view.flush());
   try {
-    assert.equal(typeof view.captureCharFrame(), "string");
+    const frame = view.captureCharFrame();
+    assert.match(frame, /██[ ▄▀█]*██/);
+    assert.match(frame, /[▄▀]/);
+    assert.doesNotMatch(frame, /HELP/);
+    for (const command of [
+      "/connect",
+      "/route",
+      "/download",
+      "/sessions",
+      "/clear",
+      "/new",
+      "!command",
+    ]) {
+      assert.ok(frame.includes(command), command);
+    }
+    assert.doesNotMatch(frame, /\/help/);
+    assert.match(frame, /\/sessions/);
+    assert.match(frame, /!command/);
   } finally {
-    await view.dispose();
+    await act(async () => view.dispose());
+  }
+});
+
+test("keeps welcome guidance visible in a compact terminal", async () => {
+  const view = await testRender(React.createElement(Welcome), { width: 36, height: 12 });
+  await act(async () => view.flush());
+  try {
+    const frame = view.captureCharFrame();
+    assert.match(frame, /XARAB/);
+    assert.match(frame, /\/connect/);
+    assert.match(frame, /\/route/);
+  } finally {
+    await act(async () => view.dispose());
+  }
+});
+test("fits welcome guidance above the composer at different terminal sizes", async () => {
+  for (const [width, height] of [
+    [120, 40],
+    [80, 24],
+    [60, 18],
+    [40, 24],
+    [36, 12],
+  ]) {
+    const view = await testRender(
+      React.createElement(
+        "box",
+        { width, height: height - 5, overflow: "hidden" },
+        React.createElement(Welcome),
+      ),
+      { width, height },
+    );
+    await act(async () => view.flush());
+    try {
+      const frame = view.captureCharFrame();
+      assert.match(frame, /\/connect/, `${width}x${height} quick action`);
+      assert.match(frame, /\/route/, `${width}x${height} routing`);
+      if (height >= 24) assert.match(frame, /!command/, `${width}x${height} full help`);
+    } finally {
+      await act(async () => view.dispose());
+    }
   }
 });

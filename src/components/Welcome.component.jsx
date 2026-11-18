@@ -1,51 +1,84 @@
 import React from "react";
 import { useTerminalDimensions } from "@opentui/react";
-import { renderScarab } from "../utils/scarab-image.js";
 import { getTheme } from "../utils/theme-engine.js";
 
 const colors = getTheme().welcome;
 
-const footer = [
-  ["XARAB", "brand"],
-  ["AI CODING ASSISTANT", "heading"],
-  ["Smart routing · workspace-aware tools", "copy"],
-  ["", "space"],
-  ["Ask a question or describe a change.", "copy"],
-  ["/connect providers · Ctrl+O saved sessions · !command shell", "hint"],
-];
-
 // The composer uses four rows at its minimum size and the status bar uses one.
 const appChromeRows = 5;
-const maxImageWidth = 40;
-const maxImagePixels = 23;
+// Rasterized at 8px from the landing page's Press Start 2P Regular font:
+// https://github.com/google/fonts/tree/main/ofl/pressstart2p (SIL OFL 1.1).
+// Each glyph occupies an 8×8 cell; half blocks preserve square pixel proportions.
+const glyphs = {
+  x: [
+    "........",
+    "........",
+    "##...##.",
+    ".##.##..",
+    "..###...",
+    ".##.##..",
+    "##...##.",
+    "........",
+  ],
+  a: [
+    "........",
+    "........",
+    ".#####..",
+    ".....##.",
+    ".######.",
+    "##...##.",
+    ".######.",
+    "........",
+  ],
+  r: [
+    "........",
+    "........",
+    ".##.###.",
+    ".###....",
+    ".##.....",
+    ".##.....",
+    ".##.....",
+    "........",
+  ],
+  b: [
+    "##......",
+    "##......",
+    "######..",
+    "##...##.",
+    "##...##.",
+    "##...##.",
+    ".#####..",
+    "........",
+  ],
+};
+const pixels = Array.from({ length: 8 }, (_, row) =>
+  [..."xarab"].map((letter) => glyphs[letter][row]).join(""),
+);
+const blocks = [" ", "▄", "▀", "█"];
+const wordmark = Array.from({ length: 4 }, (_, row) =>
+  Array.from(
+    { length: 40 },
+    (_, x) =>
+      blocks[(pixels[row * 2][x] === "#" ? 2 : 0) + (pixels[row * 2 + 1][x] === "#" ? 1 : 0)],
+  ).join(""),
+);
 
 export function Welcome() {
-  const { width: terminalWidth, height: terminalHeight } = useTerminalDimensions();
-  const imageRows = Math.max(1, terminalHeight - appChromeRows - footer.length);
-  const scarabPalette = [
-    undefined,
-    "#c6d9a7",
-    "#b7ce9b",
-    "#a9c292",
-    "#91b68c",
-    "#769f87",
-    "#628981",
-    "#b5d9d4",
-    "#86c5c5",
-    "#5ba6ad",
-    "#438795",
-    "#4f91b3",
-    "#3c7195",
-    "#2d5275",
-    "#20394f",
-    "#172a3a",
+  const { width, height } = useTerminalDimensions();
+  const availableRows = Math.max(0, height - appChromeRows);
+  const showWordmark = width >= 40 && availableRows >= 14;
+  const commands = [
+    ["/connect", "Connect a provider"],
+    ["/route", "Set up routing and workers"],
+    ["/download", "Find local models"],
+    ["/sessions", "Browse saved sessions"],
+    ["/clear", "Clear the conversation"],
+    ["/new", "Start a new session"],
+    ["!command", "Run a shell command"],
   ];
-  const scarab = renderScarab({
-    palette: scarabPalette,
-    width: Math.min(maxImageWidth, Math.max(1, terminalWidth - 2)),
-    // Each terminal row of the image contains two image pixels.
-    maxRows: Math.min(maxImagePixels, imageRows * 2),
-  });
+  const logoRows = showWordmark ? 4 : 1;
+  const margin = availableRows >= 10 ? 1 : 0;
+  const visibleCommands = Math.max(0, availableRows - logoRows - margin - 1);
 
   return (
     <box
@@ -56,26 +89,30 @@ export function Welcome() {
       justifyContent="center"
       width="100%"
     >
-      <box flexDirection="column" alignSelf="center">
-        {scarab.map((row, rowIndex) => (
-          <text key={rowIndex}>
-            {row.map(({ text, color, backgroundColor }, pixelIndex) => (
-              <span key={pixelIndex} fg={color} bg={backgroundColor}>
-                {text}
-              </span>
-            ))}
-          </text>
-        ))}
-      </box>
-      {footer.map(([text, type]) =>
-        type === "space" ? (
-          <text key={`${type}-${text}`}> </text>
-        ) : (
-          <text key={text} fg={colors[type]} bold={type === "brand" || type === "heading"}>
-            {text}
-          </text>
-        ),
+      {showWordmark ? (
+        <box flexDirection="column" alignItems="center">
+          {wordmark.map((row, index) => (
+            <text key={index} fg={colors.brand}>
+              {row}
+            </text>
+          ))}
+        </box>
+      ) : (
+        <text fg={colors.brand} bold>
+          XARAB
+        </text>
       )}
+      <box flexDirection="column" marginTop={margin}>
+        {commands.slice(0, visibleCommands).map(([command, description]) => {
+          const showDescription = `${command.padEnd(10)} ${description}`.length <= width;
+          return (
+            <box key={command} flexDirection="row">
+              <text fg={colors.heading}>{showDescription ? command.padEnd(10) : command}</text>
+              {showDescription ? <text fg={colors.copy}> {description}</text> : null}
+            </box>
+          );
+        })}
+      </box>
     </box>
   );
 }
