@@ -24,6 +24,11 @@ import { replaceStatusToast } from "./utils/status-toasts.js";
 
 const colors = getTheme().colors;
 
+export const chatScrollAcceleration = {
+  tick: () => 10,
+  reset: () => {},
+};
+
 const pageScrollKeys = new Map([
   ["pageup", -1],
   ["pagedown", 1],
@@ -250,6 +255,9 @@ export function App({
           flexGrow={1}
           flexShrink={1}
           minHeight={0}
+          scrollY
+          scrollAcceleration={chatScrollAcceleration}
+          stickyScroll
           scrollY
           stickyScroll
           stickyStart="bottom"
