@@ -104,10 +104,10 @@ export function Welcome() {
       )}
       <box flexDirection="column" marginTop={margin}>
         {commands.slice(0, visibleCommands).map(([command, description]) => {
-          const showDescription = `${command.padEnd(10)} ${description}`.length <= width;
+          const showDescription = `${command.padEnd(14)} ${description}`.length <= width;
           return (
             <box key={command} flexDirection="row">
-              <text fg={colors.heading}>{showDescription ? command.padEnd(10) : command}</text>
+              <text fg={colors.heading}>{showDescription ? command.padEnd(14) : command}</text>
               {showDescription ? <text fg={colors.copy}> {description}</text> : null}
             </box>
           );
