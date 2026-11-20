@@ -82,12 +82,14 @@ export function createLocalLlamaWorkerAdapter({
       ]),
     );
     const contextSequence = context.getSequence();
-    await contextSequence.clearHistory();
-    const session = modelRuntime.createSession({
-      contextSequence,
-      systemPrompt: instructions,
-    });
+    let session;
     try {
+      await contextSequence.clearHistory();
+      session = modelRuntime.createSession({
+        contextSequence,
+        systemPrompt: instructions,
+        contextShift: { size: Math.min(6144, Math.floor(contextSize / 2)) },
+      });
       const { history, prompt } = formatInput(input);
       if (history.length) session.setChatHistory([...session.getChatHistory(), ...history]);
       try {
@@ -105,8 +107,11 @@ export function createLocalLlamaWorkerAdapter({
         throw error;
       }
     } finally {
-      await session.dispose?.();
-      await contextSequence.clearHistory();
+      try {
+        await session?.dispose?.();
+      } finally {
+        await contextSequence.dispose?.();
+      }
     }
   }
 

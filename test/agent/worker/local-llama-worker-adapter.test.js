@@ -2,6 +2,54 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createLocalLlamaWorkerAdapter } from "../../../src/agent/worker/local-llama-worker-adapter.js";
 
+test("local worker releases its sequence after successful and failed turns", async () => {
+  let reserved = false;
+  let fail = false;
+  let loads = 0;
+  const adapter = createLocalLlamaWorkerAdapter({
+    modelRuntime: {
+      async getLlama() {
+        return {
+          async loadModel() {
+            loads++;
+            return {
+              async createContext() {
+                return {
+                  getSequence() {
+                    if (reserved) throw new Error("No sequences left");
+                    reserved = true;
+                    return {
+                      clearHistory() {},
+                      dispose() {
+                        reserved = false;
+                      },
+                    };
+                  },
+                };
+              },
+            };
+          },
+        };
+      },
+      createSession({ contextShift }) {
+        assert.equal(contextShift.size, 6144);
+        if (fail) throw new Error("session creation failed");
+        return { prompt: async () => "done", dispose() {} };
+      },
+    },
+  });
+  const request = { model: "model.gguf", input: "hello" };
+  await adapter.run(request);
+  await adapter.run(request);
+  fail = true;
+  await assert.rejects(adapter.run(request), /session creation failed/);
+  fail = false;
+  await adapter.run(request);
+  assert.equal(loads, 1);
+  assert.equal(reserved, false);
+  await adapter.dispose();
+});
+
 test("local worker replays completed typed history without executing historical tools", async () => {
   let history;
   let prompt;
