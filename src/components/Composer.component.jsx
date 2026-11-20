@@ -216,8 +216,8 @@ export function Composer({
               : suggestions.length
                 ? `↑↓ choose · Tab complete · Enter select/run${generating && onStopGeneration ? " · Esc stop" : ""}`
                 : generating
-                  ? `Enter queue · Ctrl+J newline${onStopGeneration ? " · Esc stop" : ""}`
-                  : `${messageSuggestion && !value ? "Tab accept · " : ""}Ctrl+J newline · Enter send`}
+                  ? `Enter queue · Shift+Enter newline${onStopGeneration ? " · Esc stop" : ""}`
+                  : `${messageSuggestion && !value ? "Tab accept · " : ""}Shift+Enter newline · Enter send`}
           </text>
         </box>
       </box>
