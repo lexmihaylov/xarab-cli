@@ -4,7 +4,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { workerVariants, effortLabel } from "../src/utils/worker-effort.js";
-import { createConfigStore } from "../src/utils/config-store.js";
+import { createTieredConfigStore } from "../src/tiered/config-store.js";
 import { buildWorkerHistory } from "../src/agent/worker/worker.js";
 import { restoreMessages } from "../src/agent/session-history.js";
 
@@ -36,11 +36,11 @@ test("effort survives separate routing config save/load, without changing classi
   const dir = await mkdtemp(path.join(os.tmpdir(), "xarab-effort-"));
   try {
     const args = [path.join(dir, "config.json"), path.join(dir, "routing.json")];
-    const store = createConfigStore(...args);
+    const store = createTieredConfigStore(...args);
     await store.setTierWorker(1, { provider: "openai", model: "m", effort: "default" });
     await store.setTierWorker(2, { provider: "openai", model: "m", effort: "high" });
     await store.setClassifier({ provider: "openai", model: "m", effort: "high" });
-    const loaded = createConfigStore(...args);
+    const loaded = createTieredConfigStore(...args);
     await loaded.load();
     assert.equal(loaded.getTierWorker(1).effort, "default");
     assert.equal(loaded.getTierWorker(2).effort, "high");

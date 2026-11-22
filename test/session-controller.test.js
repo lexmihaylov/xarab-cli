@@ -15,6 +15,7 @@ async function setup(t, behavior = async ({ onText }) => onText("Reply")) {
   });
   const create = async () => {
     const controller = createAssistantController({
+      mode: "tiered",
       automaticTitles: false,
       root,
       workspace: root,
@@ -41,7 +42,7 @@ async function setup(t, behavior = async ({ onText }) => onText("Reply")) {
     return controller;
   };
   const configure = async (controller) => {
-    await controller.setRouterClassifier(path.join(root, "classifier.gguf"));
+    await controller.setRouterClassifier({ provider: "openai", model: "classifier" });
     await controller.setRouterTierWorker(1, { provider: "openai", model: "test-model" });
   };
   return {
@@ -52,7 +53,7 @@ async function setup(t, behavior = async ({ onText }) => onText("Reply")) {
   };
 }
 
-test("routes chat through the local classifier to an OpenAI worker and autosaves it", async (t) => {
+test("routes chat through the remote classifier to an OpenAI worker and autosaves it", async (t) => {
   const { root, create, configure, store } = await setup(t);
   const controller = await create();
   await configure(controller);
@@ -66,8 +67,8 @@ test("routes chat through the local classifier to an OpenAI worker and autosaves
   assert.deepEqual(record.history, []);
   assert.equal((await store.list(root)).sessions.length, 1);
   assert.deepEqual(controller.getState().classifier, {
-    provider: "local",
-    model: path.join(root, "classifier.gguf"),
+    provider: "openai",
+    model: "classifier",
   });
 });
 
@@ -190,11 +191,11 @@ test("a completed turn clears and saves a restored interrupted flag", async (t) 
   await configure(controller);
   await controller.submit("Prior turn");
   const id = controller.getState().currentSession.id;
+  await controller.startNewSession();
   const record = await store.load(id);
   record.interrupted = true;
   await store.save(record);
 
-  await controller.startNewSession();
   await controller.restoreSession(id);
   await controller.submit("Finish recovery");
 
@@ -206,12 +207,13 @@ test("legacy local-model metadata is ignored when restoring a session", async (t
   const controller = await create();
   await configure(controller);
   await controller.submit("Existing conversation");
-  const record = await store.load(controller.getState().currentSession.id);
+  const id = controller.getState().currentSession.id;
+  await controller.startNewSession();
+  const record = await store.load(id);
   record.modelPath = path.join(root, "removed-model.gguf");
   record.contextSize = 32768;
   await store.save(record);
 
-  await controller.startNewSession();
   await controller.restoreSession(record.id);
   assert.ok(
     controller.getState().messages.some((message) => message.message === "Existing conversation"),

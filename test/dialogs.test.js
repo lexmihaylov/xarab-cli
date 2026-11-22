@@ -3,7 +3,7 @@ import test from "node:test";
 import React, { act } from "react";
 import { testRender } from "@opentui/react/test-utils";
 import { ProviderConnections } from "../src/components/ProviderConnections.component.jsx";
-import { ModelChooser } from "../src/components/ModelChooser.component.jsx";
+import { ModelChooser } from "../src/tiered/ModelChooser.component.jsx";
 import { StatusBar } from "../src/components/StatusBar.component.jsx";
 
 async function render(element, options = { width: 120, height: 30 }) {
@@ -39,39 +39,8 @@ test("model chooser applies the selected router and worker model", async () => {
     await act(async () => view.mockInput.pressEnter());
     await view.flush();
     await act(async () => view.mockInput.pressEnter());
-    assert.deepEqual(classifiers, [{ provider: "local", model: "/models/router.gguf" }]);
-    assert.deepEqual(workers, [[1, { provider: "local", model: "/models/router.gguf" }]]);
-  } finally {
-    await view.dispose();
-  }
-});
-
-test("model chooser deletes a selected router after confirmation", async () => {
-  const deleted = [];
-  const view = await render(
-    React.createElement(ModelChooser, {
-      models: [{ provider: "local", id: "/models/router.gguf", name: "router.gguf" }],
-      modelSettings: {},
-      classifierModel: null,
-      tierWorkers: {},
-      onClose() {},
-      onSetClassifier() {},
-      onSetTierWorker() {},
-      onDeleteModel: (model) => deleted.push(model),
-      onRefreshWorkerModels() {},
-    }),
-  );
-  try {
-    await act(async () => view.mockInput.pressArrow("down"));
-    await view.flush();
-    await act(async () => view.mockInput.pressKey("d", { ctrl: true }));
-    await view.flush();
-    const confirmation = view.captureCharFrame();
-    assert.match(confirmation, /DELETE LOCAL MODEL/);
-    assert.match(confirmation, /Delete router\.gguf from local storage\? This cannot be undone\./);
-    assert.match(confirmation, /Enter confirm · Esc cancel/);
-    await act(async () => view.mockInput.pressEnter());
-    assert.deepEqual(deleted, ["/models/router.gguf"]);
+    assert.deepEqual(classifiers, [{ provider: "openai", model: "gpt-test" }]);
+    assert.equal(workers[0][1].provider, "openai");
   } finally {
     await view.dispose();
   }

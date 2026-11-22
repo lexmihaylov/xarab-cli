@@ -1,9 +1,10 @@
 import { readFileSync } from "node:fs";
+import Handlebars from "handlebars";
 import { buildSystemPrompt } from "./instructions.js";
 
-const tierAdjustmentInstructions = readFileSync(
-  new URL("../instructions/tier-adjustment.md", import.meta.url),
-  "utf8",
+const tierAdjustmentInstructions = Handlebars.compile(
+  readFileSync(new URL("../instructions/tier-adjustment.md", import.meta.url), "utf8"),
+  { noEscape: true },
 );
 
 export function systemPromptFor({
@@ -22,6 +23,7 @@ export function systemPromptFor({
     workspace,
     instructionFiles,
     delegated,
+    delegation: !delegated && Object.hasOwn(definitions, "task"),
     availableTools: [
       ...toolDescriptions,
       ...(tierAdjustmentTool
@@ -29,6 +31,7 @@ export function systemPromptFor({
         : []),
     ],
   });
-  if (!tierAdjustmentTool) return prompt;
-  return `${prompt}\n\n${tierAdjustmentInstructions.replace("{{tier}}", String(tier))}`;
+  return [prompt, tierAdjustmentTool ? tierAdjustmentInstructions({ tier: String(tier) }) : null]
+    .filter(Boolean)
+    .join("\n\n");
 }

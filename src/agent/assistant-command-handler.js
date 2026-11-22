@@ -1,3 +1,4 @@
+import { resolveAppPolicy } from "./app-policy.js";
 import { logoutMcpOAuth } from "./worker/mcp-oauth.js";
 import { runShellCommand } from "./worker/tools/shell-command-executor.js";
 import {
@@ -8,6 +9,10 @@ import {
 
 export function createCommandHandler({
   workspace,
+  mode,
+  commandPolicy = resolveAppPolicy(mode).commands,
+  routeMessage,
+  openModelChooser,
   addMessage,
   updateStatus,
   notify,
@@ -29,6 +34,14 @@ export function createCommandHandler({
   classifyForRouting,
   runWorker,
 }) {
+  if (
+    !commandPolicy ||
+    typeof commandPolicy.help !== "string" ||
+    typeof commandPolicy.handleModeCommand !== "function" ||
+    typeof commandPolicy.dispatch !== "function"
+  )
+    throw new Error("A valid command policy or application mode is required.");
+
   async function runUserCommand(command) {
     if (!command.trim())
       return addMessage({
@@ -71,8 +84,7 @@ export function createCommandHandler({
     if (text === "/help") {
       addMessage({
         type: "system",
-        message:
-          "Commands: /help, /new [name], /sessions, /save [name], /route, /connect, /download [query], /compact, /clear, /exit.\nUse /route to configure the router and tier workers. Routers and workers can use OpenAI or local GGUF models.\nUse /connect to connect providers, then select their models with /route.\nUse /compact to replace the conversation with an AI-generated summary.\nSessions autosave; Ctrl+O opens the session browser. Use /download to search Hugging Face.\nPrefix a shell command with ! to run it and attach its output to your next message.\nEnter sends; Shift+Enter/Ctrl+N adds a line; PgUp/PgDn scroll; Esc stops generation.",
+        message: commandPolicy.help,
       });
       return;
     }
@@ -116,60 +128,20 @@ export function createCommandHandler({
       });
       return;
     }
-    if (text === "/route") return openRouteModelModal();
     if (text === "/connect") return openProviderModal();
-    if (text === "/download" || text.startsWith("/download "))
-      return openDownloadModal(text.slice("/download".length).trim());
-
-    const userMessage = addMessage({
-      type: "user",
-      message: text,
-      classification: { status: "classifying" },
+    const command = commandPolicy.handleModeCommand(text, {
+      openModelChooser,
+      openRouteModelModal,
+      openDownloadModal,
+      addMessage,
     });
-    let route;
-    try {
-      route = await classifyForRouting(text);
-    } catch (error) {
-      userMessage.classification = { status: "error" };
-      notify();
-      throw error;
-    }
-    if (route?.cancelled) {
-      userMessage.classification = { status: "cancelled" };
-      notify();
-      return;
-    }
-    if (!route) {
-      userMessage.classification = { status: "error" };
-      notify();
-      return addMessage({
-        type: "system",
-        message: "Configure a router and tier worker with /route before chatting.",
-        severity: "warning",
-      });
-    }
-    const { classification, worker } = route;
-    if (!worker) {
-      userMessage.classification = { status: "error" };
-      notify();
-      throw new Error(`No worker is configured for Tier ${classification.tier}.`);
-    }
-    if (!worker.configured) {
-      userMessage.classification = { status: "error" };
-      notify();
-      throw new Error("Tier worker configuration is invalid; choose a model in /route.");
-    }
-    userMessage.classification = {
-      status: "done",
-      tier: classification.tier,
-      model: worker.model,
-      confidence: classification.confidence,
-      rationale: classification.rationale,
-    };
-    notify();
-    return runWorker(text, {
-      tier: classification.tier,
-      userMessage,
+    if (command.handled) return command.value;
+    return commandPolicy.dispatch(text, {
+      routeMessage,
+      addMessage,
+      classifyForRouting,
+      notify,
+      runWorker,
     });
   }
 

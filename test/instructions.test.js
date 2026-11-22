@@ -1,3 +1,4 @@
+import { systemPromptFor } from "../src/agent/worker/worker-prompt.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
@@ -16,11 +17,13 @@ test("keeps the core system prompt concise", () => {
 test("prefers direct work and safe parallelism", () => {
   const prompt = buildSystemPrompt({ workspace: "/workspace" });
   assert.match(prompt, /Work directly by default/);
+  assert.doesNotMatch(prompt, /Delegate bounded work/);
+  const withTasks = systemPromptFor({ definitions: { task: { description: "Delegate" } } });
   assert.match(
-    prompt,
+    withTasks,
     /Delegate bounded work only when the benefit outweighs coordination overhead/,
   );
-  assert.match(prompt, /prefer parallel independent subtasks without overlapping edits/);
+  assert.match(withTasks, /prefer parallel independent subtasks without overlapping edits/);
   for (const delegated of [false, true]) {
     const workerPrompt = buildSystemPrompt({ workspace: "/workspace", delegated });
     assert.match(workerPrompt, /Issue independent tool calls in parallel when practical/);
@@ -28,6 +31,33 @@ test("prefers direct work and safe parallelism", () => {
     assert.match(workerPrompt, /Concurrency depends on the provider and runtime/);
   }
 });
+test("renders built-in templates without interpreting project or tool content", () => {
+  const prompt = systemPromptFor({
+    workspace: "/workspace",
+    instructionFiles: [{ path: "{{tier}}", content: "{{#if delegation}}project{{/if}}" }],
+    definitions: { task: { description: "{{tier}} & <tool>" } },
+    tier: "2<&",
+    tierAdjustmentTool: { description: "{{tier}}" },
+  });
+  assert.match(prompt, /Project instructions: \{\{tier\}\}/);
+  assert.ok(prompt.includes("{{#if delegation}}project{{/if}}"));
+  assert.ok(prompt.includes("- task: {{tier}} & <tool>"));
+  assert.ok(prompt.includes("Your active tier is 2<&."));
+  assert.ok(prompt.indexOf("Project instructions:") < prompt.indexOf("## Delegation"));
+  assert.ok(prompt.indexOf("## Delegation") < prompt.indexOf("## Tier adjustment"));
+
+  const delegated = systemPromptFor({
+    workspace: "/workspace",
+    definitions: { task: { description: "Delegate" } },
+    tier: 3,
+    tierAdjustmentTool: { description: "Adjust" },
+    delegated: true,
+  });
+  assert.doesNotMatch(delegated, /## Delegation/);
+  assert.match(delegated, /Your active tier is 3\./);
+  assert.doesNotMatch(systemPromptFor({ definitions: {} }), /## Tier adjustment/);
+});
+
 test("requires research and explicit approval before consequential implementation", () => {
   const prompt = buildSystemPrompt({ workspace: "/workspace" });
   assert.match(prompt, /do not begin making changes immediately/);

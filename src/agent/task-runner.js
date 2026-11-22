@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { createSingleTaskPolicy } from "../single/task-policy.js";
+import { createTieredTaskPolicy } from "../tiered/task-policy.js";
 
 const MAX_INPUT = 32 * 1024;
 const MAX_OUTPUT = 16 * 1024;
@@ -113,7 +115,16 @@ function failureResult({ id, error, signal, failureStatus, partial }) {
     partial,
   };
 }
-export function createTaskRunner({ classify, createWorker, timeoutMs = 120_000, maxQueued = 4 }) {
+export function createTaskRunner({
+  classify,
+  createWorker,
+  getSingleModel,
+  taskPolicy = getSingleModel
+    ? createSingleTaskPolicy({ getSingleModel })
+    : createTieredTaskPolicy({ classify }),
+  timeoutMs = 120_000,
+  maxQueued = 4,
+}) {
   const active = new Set();
   let utilityQueue = Promise.resolve();
   let queued = 0;
@@ -179,20 +190,17 @@ export function createTaskRunner({ classify, createWorker, timeoutMs = 120_000, 
       let result;
       try {
         check();
-        let tier = 1;
-        if (mode === "agentic") {
-          phase = "classifying";
-          onProgress({ id, type: "status", status: "classifying" });
-          const classification = await classify({
-            prompt: brief.slice(0, 4096),
-            recentMessages: [],
-            signal: controller.signal,
-          });
-          check();
-          if (!classification?.valid || ![1, 2, 3].includes(classification.tier))
-            throw new Error(classification?.error || "Task classification failed.");
-          tier = classification.tier;
-        }
+        const tier = await taskPolicy.resolveTier({
+          mode,
+          brief,
+          signal: controller.signal,
+          check,
+          onClassifying() {
+            phase = "classifying";
+            onProgress({ id, type: "status", status: "classifying" });
+          },
+        });
+        check();
         worker = createWorker({
           mode,
           onToolEvent: (name, event) => {
@@ -209,8 +217,7 @@ export function createTaskRunner({ classify, createWorker, timeoutMs = 120_000, 
             onProgress({ id, type: "tool", name, event });
           },
         });
-        if (!worker.getTierInfo(tier).configured)
-          throw new Error(`Task worker tier ${tier} is not configured.`);
+        taskPolicy.assertConfigured({ worker, tier, mode });
         phase = "running";
         onProgress({ id, type: "status", status: "running" });
         const operation = executeWorker({
@@ -294,6 +301,7 @@ export function createTaskRunner({ classify, createWorker, timeoutMs = 120_000, 
 
   return {
     run: execute,
+    hasPendingWork: () => active.size > 0,
     async shutdown() {
       closed = true;
       for (const { controller } of active)

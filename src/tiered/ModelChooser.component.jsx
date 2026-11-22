@@ -4,8 +4,8 @@ import { useKeyboard, useTerminalDimensions } from "@opentui/react";
 import { getTheme } from "../utils/theme-engine.js";
 
 const colors = getTheme().colors;
-import { Modal } from "./Modal.component.jsx";
-import { MarqueeText } from "./MarqueeText.component.jsx";
+import { Modal } from "../components/Modal.component.jsx";
+import { MarqueeText } from "../components/MarqueeText.component.jsx";
 
 function providerLabel(provider) {
   return { local: "Local", openai: "OpenAI", openrouter: "OpenRouter" }[provider] ?? provider;
@@ -13,44 +13,6 @@ function providerLabel(provider) {
 
 function modelLabel(modelPath, settings = {}) {
   return settings[modelPath]?.name?.trim() || modelPath.split(/[\\/]/).at(-1);
-}
-
-function DeleteModelDialog({ model }) {
-  const modelPath = typeof model === "string" ? model : model?.model;
-  return (
-    <box
-      position="absolute"
-      top={0}
-      right={0}
-      bottom={0}
-      left={0}
-      zIndex={101}
-      alignItems="center"
-      justifyContent="center"
-    >
-      <box
-        width="58%"
-        maxWidth={72}
-        flexDirection="column"
-        backgroundColor={colors.overlay}
-        border
-        borderStyle="rounded"
-        borderColor={colors.error}
-        paddingX={2}
-        paddingY={1}
-      >
-        <text fg={colors.error} bold>
-          DELETE LOCAL MODEL
-        </text>
-        <text fg={colors.text} marginTop={1} wrapMode="word">
-          Delete {modelPath} from local storage? This cannot be undone.
-        </text>
-        <text fg={colors.hint} marginTop={1}>
-          Enter confirm · Esc cancel
-        </text>
-      </box>
-    </box>
-  );
 }
 
 export function ModelChooser({
@@ -66,12 +28,10 @@ export function ModelChooser({
   onClose,
   onSetClassifier,
   onSetTierWorker,
-  onDeleteModel,
   onRefreshWorkerModels,
   onOpenProviders,
 }) {
   const [tier, setTier] = useState(1);
-  const [confirmDelete, setConfirmDelete] = useState(false);
   const [activeControl, setActiveControl] = useState(0);
   const [classifierIndex, setClassifierIndex] = useState(0);
   const [workerIndex, setWorkerIndex] = useState(0);
@@ -83,11 +43,13 @@ export function ModelChooser({
   const classifierOptions = useMemo(() => {
     const options = [
       { name: "Routing disabled", description: "Do not classify requests", value: null },
-      ...models.map((model) => ({
-        name: `${providerLabel(model.provider)} · ${model.name}`,
-        description: model.id,
-        value: { provider: model.provider, model: model.id },
-      })),
+      ...models
+        .filter((model) => model.provider !== "local")
+        .map((model) => ({
+          name: `${providerLabel(model.provider)} · ${model.name}`,
+          description: model.id,
+          value: { provider: model.provider, model: model.id },
+        })),
     ];
     if (
       classifier?.provider !== "local" &&
@@ -104,13 +66,15 @@ export function ModelChooser({
     return options;
   }, [classifier, models]);
   const workerOptions = useMemo(() => {
-    const options = models.flatMap((model) =>
-      workerVariants(model).map((value) => ({
-        name: `${providerLabel(model.provider)} · ${model.name}${value.provider === "local" ? "" : ` · ${effortLabel(value)}`}`,
-        description: model.id,
-        value,
-      })),
-    );
+    const options = models
+      .filter((model) => model.provider !== "local")
+      .flatMap((model) =>
+        workerVariants(model).map((value) => ({
+          name: `${providerLabel(model.provider)} · ${model.name}${value.provider === "local" ? "" : ` · ${effortLabel(value)}`}`,
+          description: model.id,
+          value,
+        })),
+      );
     const known = new Set(options.map((option) => workerKey(option.value)));
     for (const worker of Object.values(tierWorkers)) {
       if (worker?.provider !== "local" && worker?.model && !known.has(workerKey(worker))) {
@@ -154,9 +118,6 @@ export function ModelChooser({
     const model = typeof option.value === "string" ? option.value : option.value.model;
     return provider === classifier?.provider && model === classifier?.model;
   };
-  const selectedClassifier = visibleClassifiers[classifierIndex]?.value;
-  const canDeleteSelectedClassifier =
-    typeof selectedClassifier === "string" || selectedClassifier?.provider === "local";
 
   useEffect(() => {
     const index = visibleClassifiers.findIndex((option) =>
@@ -194,18 +155,6 @@ export function ModelChooser({
   }, [activeControl, classifierIndex, workerIndex]);
 
   useKeyboard((key) => {
-    if (confirmDelete) {
-      if (key.name === "return") {
-        const model = visibleClassifiers[classifierIndex]?.value;
-        if (typeof model === "string" || model?.provider === "local")
-          onDeleteModel(typeof model === "string" ? model : model.model);
-        setConfirmDelete(false);
-      } else if (key.name === "escape") {
-        setConfirmDelete(false);
-      }
-      key.preventDefault();
-      return;
-    }
     if (key.name === "escape") {
       key.preventDefault();
       onClose();
@@ -231,11 +180,6 @@ export function ModelChooser({
     if (key.name === "r" && activeControl === 2 && key.ctrl) {
       key.preventDefault();
       onRefreshWorkerModels();
-      return;
-    }
-    if (key.name === "d" && key.ctrl && activeControl === 0 && canDeleteSelectedClassifier) {
-      key.preventDefault();
-      setConfirmDelete(true);
       return;
     }
     if (activeControl === 0) {
@@ -307,22 +251,7 @@ export function ModelChooser({
   );
 
   return (
-    <Modal
-      title="ROUTING & MODEL ASSIGNMENTS"
-      fullScreen
-      dimmed={confirmDelete}
-      overlay={
-        confirmDelete ? (
-          <DeleteModelDialog
-            model={modelLabel(
-              visibleClassifiers[classifierIndex]?.value?.model ??
-                visibleClassifiers[classifierIndex]?.value,
-              modelSettings,
-            )}
-          />
-        ) : null
-      }
-    >
+    <Modal title="ROUTING & MODEL ASSIGNMENTS" fullScreen>
       <text fg={colors.muted} height={1} flexShrink={0} truncate>
         Select a router and assign a provider model to each tier.
       </text>
@@ -354,7 +283,7 @@ export function ModelChooser({
                     value={routerQuery}
                     placeholder="Search router models…"
                     placeholderColor={colors.text}
-                    focused={activeControl === 0 && !confirmDelete}
+                    focused={activeControl === 0}
                     onInput={setRouterQuery}
                     width="100%"
                   />
@@ -389,7 +318,7 @@ export function ModelChooser({
                           configured ? colors.green : selected ? colors.selectedText : colors.text
                         }
                         bold={selected || configured}
-                        active={selected && !confirmDelete}
+                        active={selected}
                       >
                         {`${selected ? "› " : "· "}${option.name}${configured ? " ✓" : ""}`}
                       </MarqueeText>
@@ -426,7 +355,7 @@ export function ModelChooser({
                     <MarqueeText
                       fg={configured ? colors.green : selected ? colors.selectedText : colors.text}
                       bold={selected || configured}
-                      active={selected && !confirmDelete}
+                      active={selected}
                     >
                       {`${selected ? "› " : "· "}Tier ${number} · ${tierWorkers[number]?.model || defaultOpenAIModel || "Not configured"} · ${effortLabel(tierWorkers[number])}`}
                     </MarqueeText>
@@ -448,7 +377,7 @@ export function ModelChooser({
                       value={workerQuery}
                       placeholder="Search worker models…"
                       placeholderColor={colors.text}
-                      focused={activeControl === 2 && !confirmDelete}
+                      focused={activeControl === 2}
                       onInput={setWorkerQuery}
                       width="100%"
                     />
@@ -484,7 +413,7 @@ export function ModelChooser({
                             configured ? colors.green : selected ? colors.selectedText : colors.text
                           }
                           bold={selected || configured}
-                          active={selected && !confirmDelete}
+                          active={selected}
                         >
                           {`${selected ? "› " : "· "}${option.name}${configured ? " ✓" : ""}`}
                         </MarqueeText>
@@ -496,7 +425,7 @@ export function ModelChooser({
               </box>
             ) : (
               <text fg={colors.muted} wrapMode="word">
-                Download a local model or sign in to OpenAI to choose a worker.
+                Connect a provider to choose a worker.
               </text>
             ),
             loadingProviderModels
@@ -513,9 +442,8 @@ export function ModelChooser({
         {error || providerModelError || " "}
       </text>
       <text height={1} flexShrink={0} fg={colors.hint} truncate>
-        {`Tab choose section · ←→ edit search · ↑↓ select · Enter apply · ${
-          canDeleteSelectedClassifier ? "Ctrl+D delete · " : ""
-        }Ctrl+R refresh · /connect providers · Esc close`}
+        Tab choose section · ←→ edit search · ↑↓ select · Enter apply · Ctrl+R refresh · /connect
+        providers · Esc close
       </text>
     </Modal>
   );

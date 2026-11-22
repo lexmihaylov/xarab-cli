@@ -1,4 +1,5 @@
-import { readdir, unlink } from "node:fs/promises";
+import { lstatSync, realpathSync, unlinkSync } from "node:fs";
+import { readdir } from "node:fs/promises";
 import path from "node:path";
 import { searchHuggingFaceModels } from "../utils/huggingface-model-search.js";
 
@@ -14,9 +15,13 @@ export function createModelManager({
   setActiveDownload,
   getNextDownloadId,
   setNextDownloadId,
-  getTierClassifier,
-  clearTierClassifier,
+  appMode,
+  isLocalModelInUse,
+  unloadLocalRuntime,
 }) {
+  const deletionScope = Symbol("local model deletion");
+  let deletionPending = false;
+
   async function listModelPaths() {
     const entries = await readdir(modelsDir, { withFileTypes: true }).catch(() => []);
     return entries
@@ -38,54 +43,104 @@ export function createModelManager({
   }
 
   async function deleteModel(modelToDelete) {
-    const modelModal = getModelModal();
-    if (!modelModal || modelModal.mode !== "chooser") return;
-    const resolvedPath = path.resolve(modelToDelete);
-    const relativePath = path.relative(path.resolve(modelsDir), resolvedPath);
-    if (
-      !relativePath ||
-      relativePath.startsWith("..") ||
-      path.isAbsolute(relativePath) ||
-      !resolvedPath.toLowerCase().endsWith(".gguf")
-    ) {
-      setModelModal({ ...modelModal, error: "Only local GGUF models can be deleted." });
+    const modal = getModelModal?.();
+    if (modal?.mode !== "chooser")
+      return { deleted: false, error: "Open the model chooser first." };
+    if (deletionPending)
+      return { deleted: false, error: "A model deletion is already in progress." };
+    function reject(error) {
+      setModelModal({ ...modal, error });
       notify();
-      return;
+      return { deleted: false, error };
     }
+    if (appMode !== "single") return reject("Local model deletion is only available in xarab-one.");
+    if (
+      typeof isLocalModelInUse !== "function" ||
+      typeof configStore.removeDeletedLocalModel !== "function"
+    )
+      return reject("Local model deletion is not configured.");
+    if (getActiveDownload?.()) return reject("Wait for the current model download to finish.");
+
+    const root = path.resolve(modelsDir);
+    const invalidPath = "Only local GGUF files directly in the models directory can be deleted.";
+    if (
+      typeof modelToDelete !== "string" ||
+      modelToDelete.includes("\0") ||
+      path.normalize(modelToDelete) !== modelToDelete ||
+      !modelToDelete.endsWith(".gguf")
+    )
+      return reject(invalidPath);
+    const resolved = path.resolve(modelToDelete);
+    if (path.dirname(resolved) !== root) return reject(invalidPath);
+
+    // Provider refreshes spread the current modal; freshly opened modals do not inherit this token.
+    const token = {};
+    const currentChooser = () => {
+      const current = getModelModal();
+      return current?.mode === "chooser" && current[deletionScope] === token ? current : null;
+    };
+    deletionPending = true;
+    let deleted = false;
+    let clearedSingleModel = false;
+    let error = null;
+    let models;
+    let modelSettings;
     try {
-      await unlink(resolvedPath);
-      const classifier = configStore.getClassifier();
-      if (classifier?.provider === "local" && path.resolve(classifier.model) === resolvedPath) {
-        await configStore.setClassifier(null);
-        await getTierClassifier()?.dispose?.();
-        clearTierClassifier();
+      setModelModal({ ...modal, [deletionScope]: token });
+      // The controller must also gate new model work and assignment changes on deletionPending.
+      if (isLocalModelInUse(resolved) !== false)
+        throw new Error("Wait for the current model work to finish.");
+
+      if (unloadLocalRuntime) await unloadLocalRuntime();
+      // Validate the path after unloading, without yielding between checks and unlink. Use the
+      // canonical directory (e.g. for a system-level /tmp alias), not a symlink at modelsDir.
+      const rootStat = lstatSync(root);
+      if (!rootStat.isDirectory()) throw new Error("The models directory must not be a symlink.");
+      const realRoot = realpathSync(root);
+      const realRootStat = lstatSync(realRoot);
+      if (rootStat.dev !== realRootStat.dev || rootStat.ino !== realRootStat.ino)
+        throw new Error("The models directory changed during deletion.");
+      const target = path.join(realRoot, path.basename(resolved));
+      if (!lstatSync(target).isFile())
+        throw new Error("The model must be a regular file, not a symlink.");
+      unlinkSync(target);
+      deleted = true;
+
+      ({ clearedSingleModel } = await configStore.removeDeletedLocalModel(resolved));
+      if (currentChooser()) {
+        models = await listModels();
+        modelSettings = getModelSettings(models);
       }
-      const models = await listModels();
-      if (!getModelModal()) return;
-      let errorMessage = null;
-      try {
-        await configStore.removeModel(resolvedPath);
-      } catch (error) {
-        errorMessage = `Model deleted, but its config could not be removed: ${error.message}`;
+    } catch (cause) {
+      error = deleted
+        ? `Model deleted, but cleanup could not finish: ${cause.message}`
+        : `Could not delete model: ${cause.message}`;
+    } finally {
+      deletionPending = false;
+    }
+
+    const current = currentChooser();
+    if (current) {
+      const { [deletionScope]: _, ...next } = current;
+      if (deleted) {
+        next.models =
+          models && modelSettings
+            ? [...models, ...current.models.filter((model) => model.provider !== "local")]
+            : current.models.filter(
+                (model) => model.provider !== "local" || path.resolve(model.id) !== resolved,
+              );
+        next.modelSettings = modelSettings ?? { ...current.modelSettings };
+        delete next.modelSettings[resolved];
       }
-      const currentModal = getModelModal();
-      if (!currentModal || currentModal.mode !== "chooser") return;
-      setModelModal({
-        ...currentModal,
-        models: [...models, ...currentModal.models.filter((model) => model.provider !== "local")],
-        modelSettings: getModelSettings(models),
-        error: errorMessage,
-      });
-    } catch (error) {
-      if (!getModelModal()) return;
-      setModelModal({ ...getModelModal(), error: `Could not delete model: ${error.message}` });
+      setModelModal({ ...next, error });
     }
     notify();
+    return { deleted, clearedSingleModel, error };
   }
 
   function downloadModel(uri, fileName) {
     const modelModal = getModelModal();
-    if (!modelModal || modelModal.mode !== "download" || getActiveDownload()) return;
+    if (deletionPending || modelModal?.mode !== "download" || getActiveDownload()) return;
     const job = { id: getNextDownloadId(), controller: new AbortController() };
     setNextDownloadId(job.id + 1);
     let lastProgressAt = -Infinity;
@@ -237,6 +292,7 @@ export function createModelManager({
     listModels,
     getModelSettings,
     deleteModel,
+    isModelDeletionPending: () => deletionPending,
     downloadModel,
     cancelModelDownload,
     searchHuggingFace,

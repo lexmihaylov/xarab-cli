@@ -1,7 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createAssistantController } from "../src/agent/controller.js";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { singleAppPolicy } from "../src/single/app-policy.js";
+import { tieredAppPolicy } from "../src/tiered/app-policy.js";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 test("controller owns command handling and publishes updated UI state", async (t) => {
@@ -11,6 +13,7 @@ test("controller owns command handling and publishes updated UI state", async (t
   let quitRequested = false;
   let copiedAuthorizationUrl;
   const controller = createAssistantController({
+    mode: "tiered",
     automaticTitles: false,
     root: process.cwd(),
     workspace: process.cwd(),
@@ -64,7 +67,7 @@ test("controller owns command handling and publishes updated UI state", async (t
   assert.equal(controller.getState().modelModal.mode, "chooser");
   controller.closeModelModal();
   await controller.submit("/download");
-  assert.equal(controller.getState().modelModal.mode, "download");
+  assert.equal(controller.getState().modelModal, null);
 
   await controller.submit("/exit");
   assert.equal(quitRequested, true);
@@ -80,6 +83,7 @@ test("follow-ups run in FIFO order and remain pending after interruption", async
   let ready = new Promise((resolve) => (started = resolve));
   const prompts = [];
   const controller = createAssistantController({
+    mode: "tiered",
     automaticTitles: false,
     automaticSuggestions: false,
     root: temporary,
@@ -98,12 +102,12 @@ test("follow-ups run in FIFO order and remain pending after interruption", async
         return { valid: true, tier: 1, rationale: "Routine" };
       },
     }),
-    localWorkerAdapterFactory: () => ({ dispose: async () => {}, run: async () => ({}) }),
+    openAIAdapterFactory: () => ({ dispose: async () => {}, run: async () => ({}) }),
   });
   await controller.initialize();
   t.after(() => controller.shutdown());
-  await controller.setRouterClassifier(path.join(temporary, "router.gguf"));
-  await controller.setRouterTierWorker(1, { provider: "local", model: "small.gguf" });
+  await controller.setRouterClassifier({ provider: "openai", model: "classifier" });
+  await controller.setRouterTierWorker(1, { provider: "openai", model: "small.gguf" });
   const first = controller.submit("first");
   await ready;
   await controller.submit("second");
@@ -137,6 +141,7 @@ test("manual shell commands persist command, output, and severity", async (t) =>
   const temporary = await mkdtemp("/tmp/opencode/xarab-shell-test-");
   t.after(() => rm(temporary, { recursive: true, force: true }));
   const controller = createAssistantController({
+    mode: "tiered",
     automaticTitles: false,
     root: temporary,
     workspace: temporary,
@@ -176,6 +181,7 @@ test("publishes a running shell message before command completion", async (t) =>
   const temporary = await mkdtemp("/tmp/opencode/xarab-shell-running-test-");
   t.after(() => rm(temporary, { recursive: true, force: true }));
   const controller = createAssistantController({
+    mode: "tiered",
     automaticTitles: false,
     root: temporary,
     workspace: temporary,
@@ -208,6 +214,7 @@ test("controller reassesses remaining work and records adjustment outcomes", asy
       let classifications = 0;
       let runs = 0;
       const controller = createAssistantController({
+        mode: "tiered",
         automaticTitles: false,
         root: temporary,
         workspace: temporary,
@@ -229,7 +236,7 @@ test("controller reassesses remaining work and records adjustment outcomes", asy
             };
           },
         }),
-        localWorkerAdapterFactory: () => ({
+        openAIAdapterFactory: () => ({
           dispose: async () => {},
           run: async ({ tools }) => {
             runs++;
@@ -249,11 +256,11 @@ test("controller reassesses remaining work and records adjustment outcomes", asy
       });
       await controller.initialize();
       t.after(() => controller.shutdown());
-      await controller.setRouterClassifier(path.join(temporary, "router.gguf"));
-      await controller.setRouterTierWorker(1, { provider: "local", model: "small.gguf" });
-      await controller.setRouterTierWorker(2, { provider: "local", model: "medium.gguf" });
+      await controller.setRouterClassifier({ provider: "openai", model: "classifier" });
+      await controller.setRouterTierWorker(1, { provider: "openai", model: "small.gguf" });
+      await controller.setRouterTierWorker(2, { provider: "openai", model: "medium.gguf" });
       await controller.setRouterTierWorker(3, {
-        provider: "local",
+        provider: "openai",
         model: outcome === "same-model" ? "small.gguf" : "large.gguf",
       });
       await controller.submit("Investigate duplicate commits");
@@ -279,6 +286,7 @@ test("classification failure and cancellation clear the message spinner", async 
       const ready = new Promise((resolve) => (started = resolve));
       const states = [];
       const controller = createAssistantController({
+        mode: "tiered",
         automaticTitles: false,
         root: temporary,
         workspace: temporary,
@@ -303,12 +311,12 @@ test("classification failure and cancellation clear the message spinner", async 
             return { valid: true, tier: 1, rationale: "Routine" };
           },
         }),
-        localWorkerAdapterFactory: () => ({ dispose: async () => {}, run: async () => ({}) }),
+        openAIAdapterFactory: () => ({ dispose: async () => {}, run: async () => ({}) }),
       });
       await controller.initialize();
       t.after(() => controller.shutdown());
-      await controller.setRouterClassifier(path.join(temporary, "router.gguf"));
-      await controller.setRouterTierWorker(1, { provider: "local", model: "small.gguf" });
+      await controller.setRouterClassifier({ provider: "openai", model: "classifier" });
+      await controller.setRouterTierWorker(1, { provider: "openai", model: "small.gguf" });
       const pending = controller.submit("Hello");
       await ready;
       if (outcome === "cancel") controller.stopGeneration();
@@ -332,6 +340,7 @@ test("selecting a classifier loads it and persists classifier configuration", as
   t.after(() => rm(temporary, { recursive: true, force: true }));
   const loadedModels = [];
   const controller = createAssistantController({
+    mode: "tiered",
     automaticTitles: false,
     root: temporary,
     workspace: temporary,
@@ -347,18 +356,84 @@ test("selecting a classifier loads it and persists classifier configuration", as
     },
   });
   await controller.initialize();
-  await controller.setRouterClassifier(path.join(temporary, "router.gguf"));
+  await controller.setRouterClassifier({ provider: "openai", model: "classifier" });
 
-  assert.deepEqual(loadedModels, [path.join(temporary, "router.gguf")]);
+  assert.deepEqual(loadedModels, ["classifier"]);
   assert.deepEqual(controller.getState().classifier, {
-    provider: "local",
-    model: path.join(temporary, "router.gguf"),
+    provider: "openai",
+    model: "classifier",
   });
   assert.equal(controller.getState().modelModal, null);
   const routingConfig = JSON.parse(await readFile(path.join(temporary, "routing.conf"), "utf8"));
   assert.deepEqual(routingConfig.classifier, {
-    provider: "local",
-    model: path.join(temporary, "router.gguf"),
+    provider: "openai",
+    model: "classifier",
   });
   await controller.shutdown();
+});
+
+test("single mode uses the selected local model for chat and compaction, without routing or task tools", async (t) => {
+  const root = await mkdtemp("/tmp/opencode/xarab-single-controller-");
+  const requests = [];
+  const controller = createAssistantController({
+    mode: "single",
+    appPolicy: singleAppPolicy,
+    root,
+    workspace: root,
+    configPath: path.join(root, "config.json"),
+    automaticTitles: false,
+    automaticSuggestions: false,
+    classifierFactory: () => assert.fail("Single mode must never initialize the classifier"),
+    localWorkerAdapterFactory: () => ({
+      async run(request) {
+        requests.push(request);
+        request.onText("Result from the selected model");
+      },
+    }),
+  });
+  t.after(async () => {
+    await controller.shutdown();
+    await rm(root, { recursive: true, force: true });
+  });
+  await controller.initialize();
+  await controller.submit("Not configured yet");
+  assert.match(controller.getState().messages.at(-1).message, /\/model/);
+  const model = path.join(root, "model.gguf");
+  await controller.setSingleModel({ provider: "local", model });
+  await controller.submit("Use this model directly");
+  await controller.submit("Another direct turn");
+  await controller.submit("/compact");
+  assert.deepEqual(
+    requests.map((request) => request.model),
+    [model, model, model],
+  );
+  assert.ok(requests[0].tools.read_file);
+  assert.equal(requests[0].tools.task, undefined);
+  assert.equal(requests[0].tools.tier_adjustment, undefined);
+  assert.deepEqual(requests[2].tools, {});
+  assert.match(controller.getState().messages.at(-1).message, /Result from the selected model/);
+});
+
+test("tier mode rejects a legacy local classifier before creating its runtime", async (t) => {
+  const root = await mkdtemp("/tmp/opencode/xarab-tier-controller-");
+  const configPath = path.join(root, "config.json");
+  await writeFile(configPath, JSON.stringify({ classifierModel: path.join(root, "legacy.gguf") }));
+  const controller = createAssistantController({
+    mode: "tiered",
+    appPolicy: tieredAppPolicy,
+    root,
+    workspace: root,
+    configPath,
+    classifierFactory: () => assert.fail("Local classifier must not start in tier mode"),
+  });
+  t.after(async () => {
+    await controller.shutdown();
+    await rm(root, { recursive: true, force: true });
+  });
+  await controller.initialize();
+  await controller.submit("Use the legacy route");
+  assert.match(
+    controller.getState().messages.at(-1).message,
+    /Local classifiers are unavailable.*\/route/,
+  );
 });

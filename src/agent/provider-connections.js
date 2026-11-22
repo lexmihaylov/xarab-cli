@@ -5,6 +5,7 @@ export function createProviderConnections({
   onOpenAIConnected,
   onOpenRouterChanged = () => {},
   configStore,
+  chooserCommand = "/route",
 }) {
   let authorizationUrl;
   const openai = {
@@ -50,7 +51,7 @@ export function createProviderConnections({
     method: "apiKey",
     async status() {
       return configStore.getApiKey("openrouter")
-        ? "API key saved · verify by refreshing models in /route"
+        ? `API key saved · verify by refreshing models in ${chooserCommand}`
         : "No API key saved";
     },
     async complete(input) {

@@ -1,6 +1,6 @@
 // One local worker adapter per application. Concurrent work fails explicitly
 // rather than loading duplicate models or deadlocking a parent awaiting a child.
-export function createLocalWorkerRuntime(factory) {
+export function createLocalWorkerRuntime(factory, { isUnavailable = () => false } = {}) {
   let adapter;
   let busy = false;
   let closed = false;
@@ -29,6 +29,7 @@ export function createLocalWorkerRuntime(factory) {
       return {
         async run(request) {
           while (busy && wait && !closed) await idle(request.signal);
+          if (isUnavailable()) throw new Error("Wait for local model deletion to finish.");
           if (closed) throw new Error("Local worker runtime is closed.");
           if (request.signal?.aborted)
             throw request.signal.reason ?? new Error("Local task cancelled.");
@@ -48,6 +49,13 @@ export function createLocalWorkerRuntime(factory) {
         // Individual workers do not own the shared runtime.
         async dispose() {},
       };
+    },
+    isBusy: () => busy,
+    async unload() {
+      if (busy) throw new Error("The local worker is busy.");
+      const previous = adapter;
+      adapter = undefined;
+      await previous?.dispose?.();
     },
     dispose() {
       if (disposal) return disposal;

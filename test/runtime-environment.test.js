@@ -48,7 +48,7 @@ test("explicit development mode remains available", () => {
 });
 
 test("CLI initializes the environment before importing React or OpenTUI", async () => {
-  const source = await readFile(new URL("../src/cli.jsx", import.meta.url), "utf8");
+  const source = await readFile(new URL("../src/start-app.jsx", import.meta.url), "utf8");
   const imports = [...source.matchAll(/^import\s+.*$/gm)].map(([line]) => line);
   assert.equal(imports[0], 'import "./runtime-environment.js";');
 });

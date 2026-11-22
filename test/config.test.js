@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { spawn } from "node:child_process";
+import { once } from "node:events";
+import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { createConfigStore } from "../src/utils/config-store.js";
+import { createSingleConfigStore } from "../src/single/config-store.js";
+import { createTieredConfigStore } from "../src/tiered/config-store.js";
 
 test("loads classifier model labels and ignores obsolete local worker selection", async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "xarab-config-test-"));
@@ -20,7 +23,7 @@ test("loads classifier model labels and ignores obsolete local worker selection"
         apiKeys: { tavily: "test-key" },
       }),
     );
-    const store = createConfigStore(configPath);
+    const store = createSingleConfigStore(configPath);
     await store.load();
     assert.deepEqual(store.getModel(modelPath), { name: "My Classifier" });
     assert.equal(store.getApiKey("tavily"), "test-key");
@@ -34,10 +37,9 @@ test("loads classifier model labels and ignores obsolete local worker selection"
 test("starts with empty defaults when the config file does not exist", async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "xarab-config-test-"));
   try {
-    const store = createConfigStore(path.join(directory, "config.json"));
+    const store = createTieredConfigStore(path.join(directory, "config.json"));
     await store.load();
     assert.deepEqual(store.get(), {
-      models: {},
       apiKeys: {},
       openaiModel: null,
       classifier: null,
@@ -56,11 +58,11 @@ test("persists OpenRouter classifier and worker assignments", async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "xarab-openrouter-routing-"));
   const configPath = path.join(directory, "config.json");
   try {
-    const store = createConfigStore(configPath);
+    const store = createTieredConfigStore(configPath);
     await store.load();
     await store.setClassifier({ provider: "openrouter", model: "vendor/router" });
     await store.setTierWorker(1, { provider: "openrouter", model: "vendor/worker" });
-    const restored = createConfigStore(configPath);
+    const restored = createTieredConfigStore(configPath);
     await restored.load();
     assert.deepEqual(restored.getClassifier(), { provider: "openrouter", model: "vendor/router" });
     assert.deepEqual(restored.getTierWorker(1), { provider: "openrouter", model: "vendor/worker" });
@@ -69,38 +71,14 @@ test("persists OpenRouter classifier and worker assignments", async () => {
   }
 });
 
-test("persists local classifier and local or OpenAI tier worker models", async () => {
+test("tiered settings reject new local assignments", async (t) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "xarab-config-routing-test-"));
-  const configPath = path.join(directory, "config.json");
-  try {
-    const store = createConfigStore(configPath);
-    await store.load();
-    await store.setClassifier({ provider: "local", model: path.join(directory, "smollm.gguf") });
-    await store.setTierWorker(2, { provider: "openai", model: "gpt-6-astra" });
-    await store.setTierWorker(3, { provider: "local", model: path.join(directory, "local.gguf") });
-
-    assert.deepEqual(store.getClassifier(), {
-      provider: "local",
-      model: path.join(directory, "smollm.gguf"),
-    });
-    assert.deepEqual(store.getTierWorker(2), { provider: "openai", model: "gpt-6-astra" });
-    assert.deepEqual(store.getTierWorker(3), {
-      provider: "local",
-      model: path.join(directory, "local.gguf"),
-    });
-    const saved = JSON.parse(await readFile(configPath, "utf8"));
-    assert.deepEqual(saved.classifier, {
-      provider: "local",
-      model: path.join(directory, "smollm.gguf"),
-    });
-    assert.deepEqual(saved.tierWorkers[2], { provider: "openai", model: "gpt-6-astra" });
-    assert.deepEqual(saved.tierWorkers[3], {
-      provider: "local",
-      model: path.join(directory, "local.gguf"),
-    });
-  } finally {
-    await rm(directory, { recursive: true, force: true });
-  }
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const store = createTieredConfigStore(path.join(directory, "config.json"));
+  const local = { provider: "local", model: path.join(directory, "local.gguf") };
+  await store.load();
+  await assert.rejects(store.setClassifier(local), /remote/);
+  await assert.rejects(store.setTierWorker(2, local), /remote/);
 });
 
 test("stores router assignments in a separate routing.conf", async () => {
@@ -108,15 +86,15 @@ test("stores router assignments in a separate routing.conf", async () => {
   const configPath = path.join(directory, "router", "config.json");
   const routingConfigPath = path.join(directory, "xarab", "routing.conf");
   try {
-    const store = createConfigStore(configPath, routingConfigPath);
+    const store = createTieredConfigStore(configPath, routingConfigPath);
     await store.load();
-    await store.setClassifier({ provider: "local", model: path.join(directory, "smollm.gguf") });
+    await store.setClassifier({ provider: "openrouter", model: "vendor/router" });
     await store.setTierWorker(1, { provider: "openai", model: "gpt-tier-1" });
 
     const routingConfig = JSON.parse(await readFile(routingConfigPath, "utf8"));
     assert.deepEqual(routingConfig.classifier, {
-      provider: "local",
-      model: path.join(directory, "smollm.gguf"),
+      provider: "openrouter",
+      model: "vendor/router",
     });
     assert.deepEqual(routingConfig.tierWorkers[1], {
       provider: "openai",
@@ -146,7 +124,7 @@ test("migrates legacy router settings out of the general config", async () => {
         tierWorkers: { 1: { provider: "local", model: "/models/coder.gguf" } },
       }),
     );
-    const store = createConfigStore(configPath, routingConfigPath);
+    const store = createTieredConfigStore(configPath, routingConfigPath);
     await store.load();
 
     assert.deepEqual(store.getClassifier(), {
@@ -174,7 +152,7 @@ test("stores and removes provider API keys in a dedicated config section", async
   const directory = await mkdtemp(path.join(os.tmpdir(), "xarab-config-test-"));
   const configPath = path.join(directory, "config.json");
   try {
-    const store = createConfigStore(configPath);
+    const store = createTieredConfigStore(configPath);
     await store.load();
     await store.setApiKey("tavily", "  replacement-key  ");
     assert.equal(store.getApiKey("tavily"), "replacement-key");
@@ -198,7 +176,7 @@ test("ignores malformed API key entries when loading config", async () => {
       configPath,
       JSON.stringify({ apiKeys: { tavily: "valid", "bad key": "ignored", exa: 7 } }),
     );
-    const store = createConfigStore(configPath);
+    const store = createTieredConfigStore(configPath);
     await store.load();
     assert.deepEqual(store.get().apiKeys, { tavily: "valid" });
   } finally {
@@ -211,7 +189,7 @@ test("adds downloaded models and removes deleted models from persistent config",
   const configPath = path.join(directory, "config.json");
   const modelPath = path.join(directory, "downloaded.gguf");
   try {
-    const store = createConfigStore(configPath);
+    const store = createSingleConfigStore(configPath);
     await store.load();
     await store.ensureModel(modelPath);
     assert.deepEqual(store.getModel(modelPath), {});
@@ -222,4 +200,240 @@ test("adds downloaded models and removes deleted models from persistent config",
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
+});
+
+test("round-trips and clears the standalone assignment independently of legacy OpenAI settings", async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "xarab-single-config-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const configPath = path.join(directory, "config.json");
+  const store = createSingleConfigStore(configPath);
+  const restored = createSingleConfigStore(configPath);
+  await writeFile(configPath, JSON.stringify({ openaiModel: "legacy-default" }));
+  assert.equal(store.getSingleModel(), null);
+  await assert.rejects(store.setSingleModel({ provider: "unknown", model: "m" }), /single model/);
+  await assert.rejects(store.setSingleModel({ provider: "openai", model: " " }), /single model/);
+
+  for (const [input, expected] of [
+    [
+      { provider: "openrouter", model: " vendor/worker ", effort: " high " },
+      { provider: "openrouter", model: "vendor/worker", effort: "high" },
+    ],
+    [
+      { provider: "openai", model: "gpt-worker", effort: "medium" },
+      { provider: "openai", model: "gpt-worker", effort: "medium" },
+    ],
+    [
+      { provider: "local", model: " models/worker.gguf ", effort: "high" },
+      { provider: "local", model: path.resolve("models/worker.gguf") },
+    ],
+  ]) {
+    await store.setSingleModel(input);
+    await restored.load();
+    assert.deepEqual(store.getSingleModel(), expected);
+    assert.deepEqual(restored.getSingleModel(), expected);
+    assert.equal(JSON.parse(await readFile(configPath, "utf8")).openaiModel, "legacy-default");
+  }
+  await store.setSingleModel(null);
+  await restored.load();
+  assert.equal(restored.getSingleModel(), null);
+  assert.deepEqual(await readdir(directory), ["config.json"]);
+});
+
+test("concurrent startup migration and writes preserve standalone and routing settings", async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "xarab-concurrent-migration-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const configPath = path.join(directory, "config.json");
+  const routingPath = path.join(directory, "routing.conf");
+  await writeFile(
+    configPath,
+    JSON.stringify({
+      classifierModel: "classifier.gguf",
+      tierWorkers: { 1: { provider: "openai", model: "tier-one" } },
+      automaticTitles: false,
+    }),
+  );
+  const standalone = createSingleConfigStore(configPath);
+  const migration = createTieredConfigStore(configPath, routingPath);
+  const tier = createTieredConfigStore(configPath, routingPath);
+  const assignment = { provider: "openrouter", model: "vendor/worker", effort: "high" };
+  await Promise.all([
+    migration.load(),
+    standalone.setSingleModel(assignment),
+    tier.setTierWorker(2, assignment),
+  ]);
+  await tier.load();
+  assert.deepEqual(tier.getClassifier(), {
+    provider: "local",
+    model: path.resolve("classifier.gguf"),
+  });
+  assert.deepEqual(tier.getTierWorker(1), { provider: "openai", model: "tier-one" });
+  assert.deepEqual(tier.getTierWorker(2), assignment);
+  await standalone.load();
+  assert.deepEqual(standalone.getSingleModel(), assignment);
+  assert.equal(tier.getSingleModel, undefined);
+  assert.deepEqual(JSON.parse(await readFile(configPath, "utf8")), {
+    automaticTitles: false,
+    singleModel: assignment,
+  });
+});
+
+test(
+  "standalone and tier processes merge updates made from stale snapshots",
+  { timeout: 10_000 },
+  async (t) => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), "xarab-concurrent-config-"));
+    const configPath = path.join(directory, "config.json");
+    const routingPath = path.join(directory, "routing.conf");
+    const oldModel = path.join(directory, "old.gguf");
+    const newModel = path.join(directory, "new.gguf");
+    const keptModel = path.join(directory, "kept.gguf");
+    const children = [];
+    t.after(async () => {
+      for (const child of children) child.kill();
+      await rm(directory, { recursive: true, force: true });
+    });
+    await writeFile(
+      configPath,
+      JSON.stringify({
+        automaticSuggestions: false,
+        models: { [oldModel]: {}, [keptModel]: { name: "Kept", futureField: 42 } },
+        apiKeys: { obsolete: "remove-me" },
+      }),
+    );
+    await writeFile(
+      routingPath,
+      JSON.stringify({
+        tierWorkers: { 3: { provider: "openai", model: "keep-tier", futureField: true } },
+        customRouting: { keep: true },
+      }),
+    );
+
+    const singleModule = new URL("../src/single/config-store.js", import.meta.url).href;
+    const tieredModule = new URL("../src/tiered/config-store.js", import.meta.url).href;
+    const script = `
+    import { once } from "node:events";
+    import { createSingleConfigStore } from ${JSON.stringify(singleModule)};
+    import { createTieredConfigStore } from ${JSON.stringify(tieredModule)};
+    const [configPath, routingPath, updates] = process.argv.slice(1);
+    const store = routingPath ? createTieredConfigStore(configPath, routingPath) : createSingleConfigStore(configPath);
+    await store.load();
+    const start = once(process, "message");
+    process.send("ready");
+    await start;
+    await Promise.all(JSON.parse(updates).map(([method, ...args]) => store[method](...args)));
+    process.disconnect();
+  `;
+    function startProcess(routingPath, updates) {
+      const child = spawn(
+        process.execPath,
+        ["--input-type=module", "-e", script, configPath, routingPath, JSON.stringify(updates)],
+        { stdio: ["ignore", "ignore", "inherit", "ipc"] },
+      );
+      children.push(child);
+      const exited = once(child, "exit");
+      const ready = Promise.race([
+        once(child, "message").then(([message]) => assert.equal(message, "ready")),
+        exited.then(([code, signal]) =>
+          assert.fail(`Writer exited before ready (${code ?? signal})`),
+        ),
+      ]);
+      return { child, ready, exited };
+    }
+    const assignment = { provider: "openrouter", model: "vendor/worker", effort: "high" };
+    const writers = [
+      startProcess("", [
+        ["setSingleModel", assignment],
+        ["setApiKey", "openrouter", "router-key"],
+        ["ensureModel", newModel],
+        ["removeModel", oldModel],
+      ]),
+      startProcess(routingPath, [
+        ["setTierWorker", 1, assignment],
+        ["setApiKey", "tavily", "search-key"],
+      ]),
+      startProcess(routingPath, [
+        ["setTierWorker", 2, { provider: "openai", model: "tier-two" }],
+        ["setClassifier", { provider: "openai", model: "classifier" }],
+        ["removeApiKey", "obsolete"],
+      ]),
+    ];
+    await Promise.all(writers.map(({ ready }) => ready));
+    for (const { child } of writers) child.send("write");
+    assert.deepEqual(await Promise.all(writers.map(({ exited }) => exited)), [
+      [0, null],
+      [0, null],
+      [0, null],
+    ]);
+    assert.deepEqual(JSON.parse(await readFile(configPath, "utf8")), {
+      automaticSuggestions: false,
+      models: { [keptModel]: { name: "Kept", futureField: 42 }, [newModel]: {} },
+      apiKeys: { openrouter: "router-key", tavily: "search-key" },
+      singleModel: assignment,
+    });
+    assert.deepEqual(JSON.parse(await readFile(routingPath, "utf8")), {
+      tierWorkers: {
+        1: assignment,
+        2: { provider: "openai", model: "tier-two" },
+        3: { provider: "openai", model: "keep-tier", futureField: true },
+      },
+      classifier: { provider: "openai", model: "classifier" },
+      customRouting: { keep: true },
+    });
+    assert.deepEqual((await readdir(directory)).sort(), ["config.json", "routing.conf"]);
+  },
+);
+
+test("rejects a write over malformed JSON and allows the next mutation after repair", async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "xarab-malformed-config-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const configPath = path.join(directory, "config.json");
+  const store = createSingleConfigStore(configPath);
+  await store.load();
+  await writeFile(configPath, "{broken");
+  const assignment = { provider: "openai", model: "worker" };
+  await assert.rejects(store.setSingleModel(assignment), SyntaxError);
+  assert.equal(store.getSingleModel(), null);
+  assert.equal(await readFile(configPath, "utf8"), "{broken");
+  await writeFile(configPath, JSON.stringify({ automaticTitles: false }));
+  await store.setSingleModel(assignment);
+  assert.deepEqual(store.getSingleModel(), assignment);
+  assert.equal(store.get().automaticTitles, false);
+});
+
+test("single config neither reads nor migrates tier routing", async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "xarab-isolated-config-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const configPath = path.join(directory, "config.json");
+  const routingPath = path.join(directory, "routing.conf");
+  const legacy = { classifierModel: "old-router.gguf" };
+  const assignment = { provider: "openai", model: "direct" };
+  await writeFile(configPath, JSON.stringify(legacy));
+  const single = createSingleConfigStore(configPath);
+  const tiered = createTieredConfigStore(configPath);
+  await single.load();
+  await single.setSingleModel(assignment);
+  assert.deepEqual(await readdir(directory), ["config.json"]);
+  assert.deepEqual(JSON.parse(await readFile(configPath, "utf8")), {
+    ...legacy,
+    singleModel: assignment,
+  });
+  assert.equal(single.getClassifier, undefined);
+  assert.equal(tiered.ensureModel, undefined);
+
+  await writeFile(routingPath, "{invalid");
+  assert.deepEqual((await single.load()).singleModel, assignment);
+  await single.setApiKey("openrouter", "key");
+  await assert.rejects(tiered.load(), SyntaxError);
+  assert.equal(await readFile(routingPath, "utf8"), "{invalid");
+  await rm(routingPath);
+
+  await tiered.load();
+  assert.deepEqual(tiered.getClassifier(), {
+    provider: "local",
+    model: path.resolve(legacy.classifierModel),
+  });
+  assert.deepEqual(JSON.parse(await readFile(configPath, "utf8")), {
+    singleModel: assignment,
+    apiKeys: { openrouter: "key" },
+  });
 });

@@ -322,3 +322,63 @@ test("output overflow is bounded and cancellation reaches active execution", asy
   assert.match((await pending).error, /Parent stopped/);
   await runner.shutdown();
 });
+
+test("injected task policy controls routing and eligibility", async () => {
+  const calls = [];
+  const { runner } = setup({
+    taskPolicy: {
+      async resolveTier({ mode, brief, signal, onClassifying, check }) {
+        calls.push([mode, brief, signal instanceof AbortSignal]);
+        onClassifying();
+        check();
+        return 3;
+      },
+      assertConfigured({ worker, tier, mode }) {
+        calls.push([tier, mode, worker.getTierInfo(tier).configured]);
+      },
+    },
+  });
+  try {
+    const progress = [];
+    const result = await runner.run({
+      brief: "custom",
+      onProgress: (event) => progress.push(event),
+    });
+    assert.equal(result.status, "completed");
+    assert.deepEqual(calls, [
+      ["utility", "custom", true],
+      [3, "utility", true],
+    ]);
+    assert.equal(progress[0].status, "classifying");
+  } finally {
+    await runner.shutdown();
+  }
+});
+
+test("single model tasks bypass classification, reject local agentic tasks, and retain utility", async () => {
+  let selected = { provider: "openai", model: "remote" };
+  const tiers = [];
+  const runner = createTaskRunner({
+    getSingleModel: () => selected,
+    classify: () => {
+      throw Error("classified");
+    },
+    createWorker: () => ({
+      getTierInfo: (tier) => {
+        tiers.push(tier);
+        return { configured: !!selected };
+      },
+      run: async ({ onText }) => onText("agentic"),
+      complete: async ({ onText }) => onText("utility"),
+    }),
+  });
+  try {
+    assert.equal((await runner.run({ mode: "agentic", brief: "remote" })).value, "agentic");
+    selected = { provider: "local", model: "local" };
+    assert.match((await runner.run({ mode: "agentic", brief: "local" })).error, /unavailable/);
+    assert.equal((await runner.run({ brief: "utility" })).value, "utility");
+    assert.deepEqual(tiers, [undefined, undefined]);
+  } finally {
+    await runner.shutdown();
+  }
+});

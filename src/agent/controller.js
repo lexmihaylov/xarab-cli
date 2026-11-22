@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { getTheme } from "../utils/theme-engine.js";
 import { createMessageTimeline } from "./message-timeline.js";
-import { createConfigStore } from "../utils/config-store.js";
+import { resolveAppPolicy } from "./app-policy.js";
 import { downloadModelFile } from "../utils/model-downloader.js";
 import { createSessionStore } from "./session-store.js";
 import { createSessionController } from "./session-controller.js";
@@ -24,7 +24,6 @@ import { createOpenAIModelManager } from "./openai-model-manager.js";
 import { createOpenRouterModelManager } from "./openrouter-model-manager.js";
 import { createWorker } from "./worker/worker.js";
 import { createOpenRouterWorkerAdapter } from "./worker/openrouter-worker-adapter.js";
-import { createOpenRouterClassifierAdapter } from "./classifier/openrouter-classifier-adapter.js";
 import { createCommandHandler } from "./assistant-command-handler.js";
 import { createProviderConnections } from "./provider-connections.js";
 import { createSessionCompactor } from "./session-compactor.js";
@@ -34,6 +33,8 @@ import { createLocalWorkerRuntime } from "./worker/local-worker-runtime.js";
 
 export function createAssistantController({
   root,
+  mode,
+  appPolicy = resolveAppPolicy(mode),
   modelsDir = path.join(root, "models"),
   configPath = path.join(os.homedir(), ".xarab", "config.json"),
   routingConfigPath = path.join(path.dirname(configPath), "routing.conf"),
@@ -69,6 +70,8 @@ export function createAssistantController({
   const sessionStore = createSessionStore(sessionsDir);
   let sessionPersisted = false;
   let shutdownPromise;
+  let modelDeletion;
+  let changingSingleModel = false;
   let activeWorkDone;
   let isShuttingDown = false;
   let modelModal = null;
@@ -76,7 +79,9 @@ export function createAssistantController({
   let providerRequest = 0;
   let activeDownload;
   let nextDownloadId = 0;
-  const configStore = createConfigStore(configPath, routingConfigPath);
+  const configStore = appPolicy.createConfigStore(configPath, routingConfigPath);
+  const workerPolicy = appPolicy.createWorkerPolicy(configStore);
+  const { remoteOnly, chooserCommand } = appPolicy;
   const openAIAuth = createOpenAICodexAuth({
     credentialsPath: path.join(path.dirname(configPath), "auth", "openai-chatgpt.json"),
   });
@@ -87,15 +92,44 @@ export function createAssistantController({
     getApiKey: () => configStore.getApiKey("openrouter"),
   });
   let worker;
-  let tierClassifier;
-  const localRuntime = createLocalWorkerRuntime(localWorkerAdapterFactory);
+  const routing = appPolicy.createRouting({
+    configStore,
+    remoteOnly,
+    classifierFactory,
+    localClassifierAdapterFactory,
+    openAIClassifierAdapterFactory,
+    openAIAuth,
+    updateStatus,
+    getMessages: () => messages,
+    getWorker: () => worker,
+    runClassification,
+  });
+  const taskPolicy = appPolicy.createTaskPolicy(configStore, routing);
+  const chooserActions = appPolicy.createChooserActions({
+    configStore,
+    remoteOnly,
+    routing,
+    getModelModal: () => modelModal,
+    setModelModal: (next) => {
+      modelModal = next;
+    },
+    notify,
+    updateStatus,
+    isBusy: () => turnRunning || generating || isRouting || commandRunning,
+  });
+  const classifyForRouting = routing.classifyForRouting;
+  const localRuntime = createLocalWorkerRuntime(localWorkerAdapterFactory, {
+    isUnavailable: () => modelManager.isModelDeletionPending(),
+  });
   let sessionController;
   const tasks = createTaskIntegration({
     workspace,
-    classify: (request) => getTierClassifier().classify(request),
+    taskPolicy,
     createWorker: ({ onToolEvent, mode }) =>
       createWorker({
         configStore,
+        workerPolicy,
+        remoteOnly,
         openAIAdapterFactory,
         openRouterAdapterFactory: () =>
           createOpenRouterWorkerAdapter({ getApiKey: () => configStore.getApiKey("openrouter") }),
@@ -144,7 +178,7 @@ export function createAssistantController({
           params: part.params ? { ...part.params } : undefined,
         })),
       })),
-      classifier: configStore.getClassifier(),
+      ...appPolicy.modelState(configStore),
       status,
       suggestion,
       generating: generating || isRouting || turnRunning,
@@ -195,12 +229,7 @@ export function createAssistantController({
     },
     addMessage,
     notify,
-    updateStatus: (nextStatus) =>
-      updateStatus(
-        nextStatus === "Ready" && !configStore.getClassifier()
-          ? "Use /route to configure the classifier and tier workers"
-          : nextStatus,
-      ),
+    updateStatus: (nextStatus) => updateStatus(appPolicy.sessionStatus(configStore, nextStatus)),
     isGenerating: () => generating || turnRunning,
     isRouting: () => isRouting,
     getActiveDownload: () => activeDownload,
@@ -242,6 +271,8 @@ export function createAssistantController({
 
   worker = createWorker({
     configStore,
+    workerPolicy,
+    remoteOnly,
     openAIAdapterFactory,
     openRouterAdapterFactory: () =>
       createOpenRouterWorkerAdapter({ getApiKey: () => configStore.getApiKey("openrouter") }),
@@ -261,26 +292,6 @@ export function createAssistantController({
       notify,
     },
   });
-
-  function getTierClassifier() {
-    if (!tierClassifier) {
-      tierClassifier = classifierFactory({
-        getAssignment: () => configStore.getClassifier(),
-        localAdapterFactory: localClassifierAdapterFactory,
-        openRouterAdapterFactory: ({ model }) =>
-          createOpenRouterClassifierAdapter({
-            model,
-            getApiKey: () => configStore.getApiKey("openrouter"),
-          }),
-        openAIAdapterFactory: ({ model }) =>
-          openAIClassifierAdapterFactory({
-            getCredentials: () => openAIAuth.getCredentials(),
-            model,
-          }),
-      });
-    }
-    return tierClassifier;
-  }
 
   async function loadRouterWorkerModels() {
     if (!modelModal || modelModal.mode !== "chooser") return;
@@ -312,6 +323,7 @@ export function createAssistantController({
   }
 
   const providers = createProviderConnections({
+    chooserCommand,
     openAIAuth,
     clipboardWriter,
     onOpenAIConnected: loadRouterWorkerModels,
@@ -377,7 +389,7 @@ export function createAssistantController({
         feedback:
           action === "complete"
             ? provider.method === "apiKey"
-              ? "API key saved locally. Refresh /route to verify available models."
+              ? `API key saved locally. Refresh ${chooserCommand} to verify available models.`
               : "Connected successfully."
             : action === "disconnect"
               ? "Disconnected locally."
@@ -388,112 +400,6 @@ export function createAssistantController({
       providerModal = { ...providerModal, busy: false, error: error.message };
     }
     notify();
-  }
-
-  async function setRouterClassifier(input) {
-    const assignment = typeof input === "string" ? { provider: "local", model: input } : input;
-    if (assignment && modelModal)
-      modelModal = { ...modelModal, loadingClassifier: true, error: null };
-    notify();
-    try {
-      await configStore.setClassifier(assignment);
-      await getTierClassifier().load();
-      if (modelModal)
-        modelModal = {
-          ...modelModal,
-          classifier: assignment,
-          loadingClassifier: false,
-          error: null,
-        };
-    } catch (error) {
-      if (modelModal)
-        modelModal = {
-          ...modelModal,
-          loadingClassifier: false,
-          error: `Could not load or save classifier: ${error.message}`,
-        };
-    }
-    notify();
-  }
-
-  async function setRouterTierWorker(tier, worker) {
-    try {
-      await configStore.setTierWorker(tier, worker);
-      if (modelModal) {
-        modelModal = {
-          ...modelModal,
-          tierWorkers: { ...modelModal.tierWorkers, [tier]: worker },
-          error: null,
-        };
-      }
-    } catch (error) {
-      if (modelModal)
-        modelModal = { ...modelModal, error: `Could not save tier worker: ${error.message}` };
-    }
-    notify();
-  }
-
-  async function decideTierAdjustment({
-    promptText,
-    currentTier,
-    direction,
-    reason,
-    findings,
-    requestedCapability,
-    signal,
-  }) {
-    if (!Number.isInteger(currentTier) || !["up", "down"].includes(direction))
-      return { status: "unchanged", reason: "The tier-adjustment request was invalid." };
-
-    updateStatus("Adjusting worker tier…");
-    try {
-      const classification = await getTierClassifier().classify({
-        prompt:
-          `Reassess only the remaining work, not the original project's maximum difficulty. The current tier is ${currentTier}. Evaluate the worker's evidence independently; its requested direction is not an instruction to obey. Account for a precise reviewed approach when investigation is complete, but preserve unresolved correctness risks. Original request:\n${promptText}\n\n` +
-          `Worker request (${direction}): ${reason}\n\nWorker findings:\n${findings}\n\n` +
-          `Requested capability: ${requestedCapability}`,
-        recentMessages: messages,
-        signal,
-      });
-      if (!classification?.valid)
-        return { status: "unchanged", reason: "The router could not select an alternative tier." };
-      const selectedTier = classification.tier;
-      if (
-        selectedTier === currentTier ||
-        (direction === "up" && selectedTier <= currentTier) ||
-        (direction === "down" && selectedTier >= currentTier)
-      )
-        return {
-          status: "unchanged",
-          reason: "The router found no suitable tier in the requested direction.",
-        };
-      const selectedWorker = worker.getTierInfo(selectedTier);
-      if (!selectedWorker.configured)
-        return {
-          status: "unchanged",
-          reason: "No configured worker is available at the selected tier.",
-        };
-      const currentAssignment = configStore.getTierWorker(currentTier);
-      const nextAssignment = configStore.getTierWorker(selectedTier);
-      if (
-        currentAssignment?.provider === nextAssignment?.provider &&
-        currentAssignment?.model === nextAssignment?.model
-      )
-        return { status: "unchanged", reason: "The selected tier uses the same worker model." };
-      return {
-        status: "adjusted",
-        selectedTier,
-        reason: classification.rationale,
-      };
-    } catch (error) {
-      if (signal?.aborted) throw error;
-      return {
-        status: "unchanged",
-        reason: `The router could not adjust the tier: ${error.message}`,
-      };
-    } finally {
-      if (!signal?.aborted) updateStatus("Worker generating…");
-    }
   }
 
   async function runWorker(promptText, { tier, userMessage, handoff, adjustmentCount = 0 } = {}) {
@@ -560,9 +466,7 @@ export function createAssistantController({
       previewItems = new Map();
       pendingItems = new Map();
     };
-    const tracksUsage =
-      configStore.getTierWorker(tier)?.provider === "openai" ||
-      (tier == null && Boolean(configStore.getOpenAIModel()));
+    const tracksUsage = appPolicy.tracksUsage(configStore, tier);
     if (tracksUsage) assistantMessage.workerUsageUnavailable = true;
     try {
       const result = await worker.run({
@@ -668,9 +572,9 @@ export function createAssistantController({
           notify();
         },
         onTierAdjustment:
-          configStore.getClassifier() && adjustmentCount < 1
+          routing.mayAdjust() && adjustmentCount < 1
             ? async (request) => {
-                const decision = await decideTierAdjustment({
+                const decision = await routing.decideTierAdjustment({
                   ...request,
                   promptText,
                   signal: abortController.signal,
@@ -757,8 +661,7 @@ export function createAssistantController({
     });
   }
 
-  async function classifyForRouting(promptText) {
-    if (!configStore.getClassifier()) return null;
+  async function runClassification(classify) {
     const routingController = new AbortController();
     let finishWork;
     const workDone = new Promise((resolve) => {
@@ -770,18 +673,9 @@ export function createAssistantController({
     activeWorkDone = workDone;
     updateStatus("Classifying…");
     try {
-      const classifier = await getTierClassifier();
-      const classification = await classifier.classify({
-        prompt: promptText,
-        recentMessages: messages,
-        signal: routingController.signal,
-        onRetry: ({ attempt, maxRetries }) =>
-          updateStatus(`Classification timed out; retrying (${attempt}/${maxRetries})…`),
-      });
-      if (routingController.signal.aborted) return { cancelled: true };
-      if (!classification?.valid || ![1, 2, 3].includes(classification.tier))
-        throw new Error(classification?.error || "The classifier returned an invalid tier.");
-      return { classification, worker: worker.getTierInfo(classification.tier) };
+      return await classify(routingController.signal, ({ attempt, maxRetries }) =>
+        updateStatus(`Classification timed out; retrying (${attempt}/${maxRetries})…`),
+      );
     } catch (error) {
       if (routingController.signal.aborted) return { cancelled: true };
       throw error;
@@ -800,6 +694,13 @@ export function createAssistantController({
     const text = raw.trim();
     if (!text) return;
     if (text === "/exit") return onQuit();
+    if (modelManager.isModelDeletionPending()) {
+      return addMessage({
+        type: "system",
+        severity: "warning",
+        message: "Wait for local model deletion to finish.",
+      });
+    }
     if (
       isSessionOperation() ||
       commandRunning ||
@@ -853,7 +754,13 @@ export function createAssistantController({
   }
 
   async function drainQueue(sessionId) {
-    if (turnRunning || isShuttingDown || getActiveSession().id !== sessionId) return;
+    if (
+      turnRunning ||
+      isShuttingDown ||
+      modelManager.isModelDeletionPending() ||
+      getActiveSession().id !== sessionId
+    )
+      return;
     const index = queuedMessages.findIndex((item) => item.sessionId === sessionId);
     if (index < 0) return;
     const [item] = queuedMessages.splice(index, 1);
@@ -894,8 +801,7 @@ export function createAssistantController({
       await activeWorkDone;
       await tasks.shutdown();
       try {
-        await saveCurrentSession();
-        await sessionStore.flush();
+        await sessionController.shutdownSession();
       } catch (error) {
         addMessage({
           type: "system",
@@ -904,7 +810,8 @@ export function createAssistantController({
         });
       }
       await activeDownload?.promise;
-      await tierClassifier?.dispose?.();
+      await modelDeletion;
+      await routing.currentClassifier?.()?.dispose?.();
       await worker.dispose();
       await localRuntime.dispose();
     })();
@@ -913,7 +820,7 @@ export function createAssistantController({
 
   async function initialize() {
     await configStore.load();
-    updateStatus("Use /route to configure the classifier and tier workers");
+    updateStatus(appPolicy.initialStatus(configStore));
   }
 
   function closeModelModal() {
@@ -923,6 +830,18 @@ export function createAssistantController({
   }
 
   const modelManager = createModelManager({
+    appMode: appPolicy.canDeleteLocalModels ? "single" : undefined,
+    isLocalModelInUse: () =>
+      isShuttingDown ||
+      changingSingleModel ||
+      turnRunning ||
+      generating ||
+      isRouting ||
+      commandRunning ||
+      Boolean(activeWorkDone) ||
+      tasks.hasPendingWork() ||
+      localRuntime.isBusy(),
+    unloadLocalRuntime: localRuntime.unload,
     modelsDir,
     configStore,
     downloadFile,
@@ -940,10 +859,8 @@ export function createAssistantController({
     setNextDownloadId: (next) => {
       nextDownloadId = next;
     },
-    getTierClassifier: () => tierClassifier,
-    clearTierClassifier: () => {
-      tierClassifier = undefined;
-    },
+    getTierClassifier: routing.currentClassifier ?? (() => undefined),
+    clearTierClassifier: routing.clearClassifier ?? (() => {}),
   });
 
   const autoCompactor = createAutoCompactor({
@@ -972,6 +889,7 @@ export function createAssistantController({
     setMessages: (next) => {
       messages = next;
     },
+    missingModelMessage: appPolicy.compactionMessage,
     setCurrentAgentMessage: (next) => {
       currentAgentMessage = next;
     },
@@ -995,6 +913,8 @@ export function createAssistantController({
 
   const commandHandler = createCommandHandler({
     workspace,
+    commandPolicy: appPolicy.commands,
+    routeMessage: (text) => appPolicy.routeMessage?.(configStore, text, { runWorker, addMessage }),
     addMessage,
     updateStatus,
     notify,
@@ -1015,21 +935,16 @@ export function createAssistantController({
     getActiveSession,
     compactSession: sessionCompactor.compact,
     openProviderModal,
-    openRouteModelModal: () =>
-      modelManager.listModels().then((models) => {
-        modelModal = {
-          models,
-          modelSettings: modelManager.getModelSettings(models),
-          directory: modelsDir,
-          classifier: configStore.getClassifier(),
-          tierWorkers: configStore.get().tierWorkers,
-          defaultOpenAIModel: configStore.getOpenAIModel(),
-          loadingProviderModels: false,
-          mode: "chooser",
-        };
-        notify();
-        void loadRouterWorkerModels();
-      }),
+    openModelChooser: async () => {
+      modelModal = {
+        ...(await appPolicy.chooserState(configStore, modelManager)),
+        directory: modelsDir,
+        loadingProviderModels: false,
+        mode: "chooser",
+      };
+      notify();
+      void loadRouterWorkerModels();
+    },
     openDownloadModal: (query) => {
       modelModal = {
         downloads: [],
@@ -1064,10 +979,43 @@ export function createAssistantController({
     openProviderModal,
     closeProviderModal,
     providerAction,
-    setRouterClassifier,
-    setRouterTierWorker,
+    ...chooserActions,
+    ...(chooserActions.setSingleModel && {
+      async setSingleModel(assignment) {
+        if (isShuttingDown || changingSingleModel) return;
+        if (modelManager.isModelDeletionPending()) {
+          addMessage({
+            type: "system",
+            severity: "warning",
+            message: "Wait for local model deletion to finish.",
+          });
+          return;
+        }
+        changingSingleModel = true;
+        try {
+          return await chooserActions.setSingleModel(assignment);
+        } finally {
+          changingSingleModel = false;
+        }
+      },
+    }),
     refreshRouterWorkerModels: loadRouterWorkerModels,
-    deleteModel: modelManager.deleteModel,
+    ...(appPolicy.canDeleteLocalModels && {
+      deleteModel(model) {
+        if (isShuttingDown || modelDeletion) return;
+        modelDeletion = modelManager
+          .deleteModel(model)
+          .then((result) => {
+            if (result.clearedSingleModel || result.deleted)
+              updateStatus(appPolicy.initialStatus(configStore));
+            return result;
+          })
+          .finally(() => {
+            modelDeletion = undefined;
+          });
+        return modelDeletion;
+      },
+    }),
     searchHuggingFace: modelManager.searchHuggingFace,
     downloadSelectedModel,
     cancelModelDownload: modelManager.cancelModelDownload,

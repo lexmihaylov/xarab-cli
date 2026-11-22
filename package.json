@@ -1,18 +1,20 @@
 {
   "name": "xarab",
   "version": "1.0.0",
-  "description": "A terminal assistant that locally classifies requests and routes them to OpenAI workers",
+  "description": "A terminal assistant with remote tier routing and a single-model mode",
   "bin": {
-    "xarab": "bin/xarab.js"
+    "xarab": "bin/xarab.js",
+    "xarab-one": "bin/xarab-one.js"
   },
   "scripts": {
-    "start": "tsx src/cli.jsx",
+    "start": "tsx src/tiered/entry.jsx",
     "logo:generate": "node scripts/generate-scarab.js",
     "format": "prettier --write \"src/**/*.{js,jsx}\" \"test/**/*.js\" \"scripts/**/*.js\"",
     "format:check": "prettier --check \"src/**/*.{js,jsx}\" \"test/**/*.js\" \"scripts/**/*.js\"",
     "classifier:evaluate": "node scripts/evaluate-classifier.js",
     "make:install": "node scripts/make-install.js",
-    "test": "node --import ./scripts/test-environment.js --import tsx --test \"test/**/*.test.js\""
+    "test": "node --import ./scripts/test-environment.js --import tsx --test \"test/**/*.test.js\"",
+    "start:one": "tsx src/single/entry.jsx"
   },
   "keywords": [],
   "author": "",
@@ -23,6 +25,7 @@
     "@opentui/core": "^0.6.6",
     "@opentui/react": "^0.6.6",
     "diff": "^9.0.0",
+    "handlebars": "^4.7.10",
     "marked": "^18.1.0",
     "node-llama-cpp": "^3.22.1",
     "react": "^19.3.0",

@@ -6,6 +6,7 @@ import { getTheme } from "../utils/theme-engine.js";
 const colors = getTheme().colors;
 
 export function ProviderConnections({
+  modelCommand = "/route",
   providers = [],
   statuses = {},
   pending,
@@ -71,7 +72,7 @@ export function ProviderConnections({
   return (
     <Modal title="PROVIDER CONNECTIONS" fullScreen>
       <text fg={colors.muted} height={1} flexShrink={0} truncate>
-        Manage provider credentials. Select models in /route after connecting.
+        {`Manage provider credentials. Select models in ${modelCommand} after connecting.`}
       </text>
       <box flexDirection="row" flexGrow={1} minHeight={0} gap={1} marginTop={1}>
         <box
@@ -140,7 +141,7 @@ export function ProviderConnections({
                   <text fg={colors.hint} wrapMode="word">
                     {provider.id === "tavily"
                       ? "Save a Tavily key locally for web search."
-                      : "Save an API key locally. Refresh /route to verify model access."}
+                      : `Save an API key locally. Refresh ${modelCommand} to verify model access.`}
                   </text>
                   {provider.id === "tavily" && (
                     <text fg={colors.hint} wrapMode="word">

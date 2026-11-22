@@ -31,6 +31,33 @@ export function createSessionController({
   let sessionRevision = 0;
   let savedRevision = 0;
   let saveTimer;
+  let activeLock;
+  let sessionWork = Promise.resolve();
+  let shutdownPromise;
+
+  function enqueueSessionWork(action) {
+    const operation = sessionWork.catch(() => {}).then(action);
+    sessionWork = operation;
+    return operation;
+  }
+
+  function runSessionOperation(action, showPickerBusy = true) {
+    sessionOperation = true;
+    if (showPickerBusy && sessionModal) {
+      sessionModal = { ...sessionModal, busy: true, error: null };
+    }
+    const operation = enqueueSessionWork(async () => {
+      try {
+        return await action();
+      } finally {
+        sessionOperation = false;
+        if (sessionRevision !== savedRevision) scheduleSave();
+        notify();
+      }
+    });
+    notify();
+    return operation;
+  }
 
   function getState() {
     return {
@@ -70,7 +97,18 @@ export function createSessionController({
   function sessionChanged() {
     sessionRevision++;
     activeSession.updatedAt = new Date().toISOString();
-    if (isShuttingDown() || sessionOperation || saveTimer || !hasSessionContent()) return;
+    scheduleSave();
+  }
+
+  function scheduleSave() {
+    if (
+      shutdownPromise ||
+      isShuttingDown() ||
+      sessionOperation ||
+      saveTimer ||
+      !hasSessionContent()
+    )
+      return;
     saveTimer = setTimeout(() => {
       saveTimer = undefined;
       void saveCurrentSession().catch((error) => {
@@ -81,7 +119,15 @@ export function createSessionController({
     saveTimer.unref?.();
   }
 
-  async function saveCurrentSession({ name, force = false } = {}) {
+  function saveCurrentSession(options) {
+    if (shutdownPromise) return shutdownPromise;
+    const id = activeSession.id;
+    return enqueueSessionWork(() => {
+      if (activeSession.id === id) return persistCurrentSession(options);
+    });
+  }
+
+  async function persistCurrentSession({ name, force = false } = {}) {
     if (name !== undefined) {
       const title = name
         .replace(/[\u0000-\u001f\u007f]/g, " ")
@@ -97,21 +143,46 @@ export function createSessionController({
     if (!hasSessionContent()) return;
     if (!force && getSessionPersisted() && savedRevision === sessionRevision) return;
     const revision = sessionRevision;
-    const id = activeSession.id;
-    const saved = await sessionStore.save(sessionSnapshot());
-    if (activeSession.id === id) {
-      setSessionPersisted(true);
-      savedRevision = Math.max(savedRevision, revision);
-      if (sessionRevision === revision) activeSession.updatedAt = saved.updatedAt;
-      const hadError = Boolean(sessionError);
-      sessionError = null;
-      if (hadError) notify();
-    }
+    activeLock ??= await sessionStore.acquire(activeSession.id);
+    const saved = await sessionStore.save(sessionSnapshot(), activeLock);
+    setSessionPersisted(true);
+    savedRevision = Math.max(savedRevision, revision);
+    if (sessionRevision === revision) activeSession.updatedAt = saved.updatedAt;
+    const hadError = Boolean(sessionError);
+    sessionError = null;
+    if (hadError) notify();
     return saved;
   }
 
+  async function saveBeforeLeaving() {
+    do {
+      await persistCurrentSession();
+    } while (hasSessionContent() && sessionRevision !== savedRevision);
+  }
+
+  function switchActiveSession(record, lock) {
+    activeLock?.release();
+    activeLock = lock;
+    activeSession = record;
+  }
+
+  // The parent stops producers of session state before asking for the final save.
+  // Queue behind any restore/switch already in progress and always release on exit.
+  function shutdownSession() {
+    shutdownPromise ??= enqueueSessionWork(async () => {
+      try {
+        await saveBeforeLeaving();
+      } finally {
+        activeLock?.release();
+        activeLock = undefined;
+      }
+    });
+    return shutdownPromise;
+  }
+
   function updateDraft(next) {
-    if (isShuttingDown() || sessionOperation || !next || typeof next.value !== "string") return;
+    if (shutdownPromise || isShuttingDown() || sessionOperation || typeof next?.value !== "string")
+      return;
     const cursor = Math.max(
       0,
       Math.min(next.value.length, Number.isInteger(next.cursor) ? next.cursor : next.value.length),
@@ -122,7 +193,7 @@ export function createSessionController({
   }
 
   function canSwitchSession() {
-    if (isShuttingDown()) return false;
+    if (shutdownPromise || isShuttingDown()) return false;
     if (isGenerating() || sessionOperation || getActiveDownload()) {
       const error = "Stop active generation or downloads before switching sessions.";
       if (sessionModal) {
@@ -136,34 +207,30 @@ export function createSessionController({
 
   async function startNewSession(name) {
     if (!canSwitchSession()) return;
-    sessionOperation = true;
-    notify();
-    try {
-      await saveCurrentSession();
-      onSessionLeave();
-      activeSession = newSession(workspace, name?.trim().slice(0, 80));
-      setSessionPersisted(false);
-      sessionRevision = 0;
-      savedRevision = 0;
-      setMessages([]);
-      setPendingShellContext([]);
-      draft = { value: "", cursor: 0 };
-      lastTurnInterrupted = false;
-      sessionModal = null;
-      sessionRequest++;
-      sessionError = null;
-      sessionChanged();
-      updateStatus("Ready");
-      return true;
-    } catch (error) {
-      sessionError = `Could not start a new session: ${error.message}`;
-      if (sessionModal) sessionModal = { ...sessionModal, error: sessionError };
-      return false;
-    } finally {
-      sessionOperation = false;
-      if (sessionRevision !== savedRevision) sessionChanged();
-      notify();
-    }
+    return runSessionOperation(async () => {
+      try {
+        await saveBeforeLeaving();
+        onSessionLeave();
+        switchActiveSession(newSession(workspace, name?.trim().slice(0, 80)));
+        setSessionPersisted(false);
+        sessionRevision = 0;
+        savedRevision = 0;
+        setMessages([]);
+        setPendingShellContext([]);
+        draft = { value: "", cursor: 0 };
+        lastTurnInterrupted = false;
+        sessionModal = null;
+        sessionRequest++;
+        sessionError = null;
+        sessionChanged();
+        updateStatus("Ready");
+        return true;
+      } catch (error) {
+        sessionError = `Could not start a new session: ${error.message}`;
+        if (sessionModal) sessionModal = { ...sessionModal, error: sessionError };
+        return false;
+      }
+    }, false);
   }
 
   async function openSessionPicker() {
@@ -202,45 +269,46 @@ export function createSessionController({
       closeSessionPicker();
       return;
     }
-    sessionOperation = true;
-    if (sessionModal) sessionModal = { ...sessionModal, busy: true, error: null };
-    notify();
-    try {
-      const record = await sessionStore.load(id);
-      if (record.workspace !== path.resolve(workspace))
-        throw new Error(
-          "This session belongs to another workspace. Open Xarab in that workspace to resume it.",
-        );
-      await saveCurrentSession();
-      onSessionLeave();
-      activeSession = record;
-      setSessionPersisted(true);
-      sessionRevision = 0;
-      savedRevision = 0;
-      setMessages(restoreMessages(record.messages));
-      setPendingShellContext(record.pendingShellContext);
-      draft = record.draft;
-      lastTurnInterrupted = record.interrupted;
-      sessionModal = null;
-      sessionRequest++;
-      sessionError = null;
-      if (record.interrupted)
-        addMessage({
-          type: "system",
-          message:
-            "This session was interrupted. Unfinished tools have not been replayed; verify their effects before retrying.",
-          severity: "warning",
-        });
-      updateStatus("Session restored");
-      sessionChanged();
-    } catch (error) {
-      sessionError = `Could not restore session: ${error.message}`;
-      if (sessionModal) sessionModal = { ...sessionModal, error: sessionError, busy: false };
-    } finally {
-      sessionOperation = false;
-      if (sessionRevision !== savedRevision) sessionChanged();
-      notify();
-    }
+    return runSessionOperation(async () => {
+      let targetLock;
+      try {
+        targetLock = await sessionStore.acquire(id);
+        const record = await sessionStore.load(id);
+        if (record.workspace !== path.resolve(workspace))
+          throw new Error(
+            "This session belongs to another workspace. Open Xarab in that workspace to resume it.",
+          );
+        const restored = restoreMessages(record.messages);
+        await saveBeforeLeaving();
+        onSessionLeave();
+        switchActiveSession(record, targetLock);
+        targetLock = undefined;
+        setSessionPersisted(true);
+        sessionRevision = 0;
+        savedRevision = 0;
+        setMessages(restored);
+        setPendingShellContext(record.pendingShellContext);
+        draft = record.draft;
+        lastTurnInterrupted = record.interrupted;
+        sessionModal = null;
+        sessionRequest++;
+        sessionError = null;
+        if (record.interrupted)
+          addMessage({
+            type: "system",
+            message:
+              "This session was interrupted. Unfinished tools have not been replayed; verify their effects before retrying.",
+            severity: "warning",
+          });
+        updateStatus("Session restored");
+        sessionChanged();
+      } catch (error) {
+        sessionError = `Could not restore session: ${error.message}`;
+        if (sessionModal) sessionModal = { ...sessionModal, error: sessionError, busy: false };
+      } finally {
+        targetLock?.release();
+      }
+    });
   }
 
   async function renameSession(id, title) {
@@ -254,90 +322,83 @@ export function createSessionController({
       notify();
       return false;
     }
-    sessionOperation = true;
-    if (sessionModal) sessionModal = { ...sessionModal, busy: true, error: null };
-    notify();
-    try {
-      const record = await sessionStore.load(id);
-      record.title = normalized;
-      record.manualTitle = true;
-      record.updatedAt = new Date().toISOString();
-      await sessionStore.save(record);
-      if (id === activeSession.id) {
-        activeSession = record;
-        sessionChanged();
+    return runSessionOperation(async () => {
+      try {
+        if (id === activeSession.id) {
+          await persistCurrentSession({ name: normalized, force: true });
+        } else {
+          const lock = await sessionStore.acquire(id);
+          try {
+            const record = await sessionStore.load(id);
+            record.title = normalized;
+            record.manualTitle = true;
+            record.updatedAt = new Date().toISOString();
+            await sessionStore.save(record, lock);
+          } finally {
+            lock.release();
+          }
+        }
+        const listing = await sessionStore.list(workspace);
+        if (sessionModal)
+          sessionModal = {
+            ...sessionModal,
+            sessions: listing.sessions,
+            loading: false,
+            busy: false,
+            error: listing.errors.length
+              ? `${listing.errors.length} unreadable session(s) were skipped: ${listing.errors[0]}`
+              : null,
+          };
+        return true;
+      } catch (error) {
+        sessionError = `Could not rename session: ${error.message}`;
+        if (sessionModal) sessionModal = { ...sessionModal, busy: false, error: sessionError };
+        return false;
       }
-      const listing = await sessionStore.list(workspace);
-      if (sessionModal)
-        sessionModal = {
-          ...sessionModal,
-          sessions: listing.sessions,
-          loading: false,
-          busy: false,
-          error: listing.errors.length
-            ? `${listing.errors.length} unreadable session(s) were skipped: ${listing.errors[0]}`
-            : null,
-        };
-      return true;
-    } catch (error) {
-      if (sessionModal)
-        sessionModal = {
-          ...sessionModal,
-          busy: false,
-          error: `Could not rename session: ${error.message}`,
-        };
-      return false;
-    } finally {
-      sessionOperation = false;
-      notify();
-    }
+    });
   }
 
   async function deleteSession(id) {
     if (!canSwitchSession()) return false;
-    sessionOperation = true;
-    if (sessionModal) sessionModal = { ...sessionModal, busy: true, error: null };
-    notify();
-    const removingActive = id === activeSession.id;
-    let deleted = true;
-    try {
-      await sessionStore.remove(id);
-      if (removingActive) {
-        onSessionLeave();
-        clearTimeout(saveTimer);
-        saveTimer = undefined;
-        activeSession = newSession(workspace);
-        setSessionPersisted(false);
-        sessionRevision = 0;
-        savedRevision = 0;
-        setMessages([]);
-        setPendingShellContext([]);
-        draft = { value: "", cursor: 0 };
-        lastTurnInterrupted = false;
-        sessionError = null;
-        updateStatus("Session deleted");
+    return runSessionOperation(async () => {
+      const removingActive = id === activeSession.id;
+      let deleted = true;
+      try {
+        if (removingActive) activeLock ??= await sessionStore.acquire(id);
+        await sessionStore.remove(id, removingActive ? activeLock : undefined);
+        if (removingActive) {
+          onSessionLeave();
+          clearTimeout(saveTimer);
+          saveTimer = undefined;
+          switchActiveSession(newSession(workspace));
+          setSessionPersisted(false);
+          sessionRevision = 0;
+          savedRevision = 0;
+          setMessages([]);
+          setPendingShellContext([]);
+          draft = { value: "", cursor: 0 };
+          lastTurnInterrupted = false;
+          sessionError = null;
+          updateStatus("Session deleted");
+        }
+        const listing = await sessionStore.list(workspace);
+        if (sessionModal)
+          sessionModal = {
+            ...sessionModal,
+            sessions: listing.sessions,
+            loading: false,
+            busy: false,
+            error: listing.errors.length
+              ? `${listing.errors.length} unreadable session(s) were skipped: ${listing.errors[0]}`
+              : null,
+          };
+      } catch (error) {
+        deleted = false;
+        sessionError = `Could not delete session: ${error.message}`;
+        if (sessionModal) sessionModal = { ...sessionModal, busy: false, error: sessionError };
       }
-      const listing = await sessionStore.list(workspace);
-      if (sessionModal)
-        sessionModal = {
-          ...sessionModal,
-          sessions: listing.sessions,
-          loading: false,
-          busy: false,
-          error: listing.errors.length
-            ? `${listing.errors.length} unreadable session(s) were skipped: ${listing.errors[0]}`
-            : null,
-        };
-    } catch (error) {
-      deleted = false;
-      sessionError = `Could not delete session: ${error.message}`;
-      if (sessionModal) sessionModal = { ...sessionModal, busy: false, error: sessionError };
-    } finally {
-      sessionOperation = false;
-      if (sessionRevision !== savedRevision) sessionChanged();
-      notify();
-    }
-    return deleted;
+      return deleted;
+    });
   }
 
   return {
@@ -352,6 +413,7 @@ export function createSessionController({
     sessionSnapshot,
     sessionChanged,
     saveCurrentSession,
+    shutdownSession,
     updateDraft,
     startNewSession,
     openSessionPicker,

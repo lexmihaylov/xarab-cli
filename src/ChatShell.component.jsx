@@ -4,7 +4,6 @@ import { AskQuestionsDialog } from "./components/AskQuestionsDialog.component.js
 import { CommandApprovalDialog } from "./components/CommandApprovalDialog.component.jsx";
 import { useKeyboard, useSelectionHandler } from "@opentui/react";
 import { copyToClipboard } from "./utils/clipboard.js";
-import { Composer } from "./components/Composer.component.jsx";
 import { StatusBar } from "./components/StatusBar.component.jsx";
 import { AssistantMessage } from "./components/AssistantMessage.component.jsx";
 import { GeneratingMessage } from "./components/GeneratingMessage.component.jsx";
@@ -14,9 +13,7 @@ import { UserMessage } from "./components/UserMessage.component.jsx";
 import { UnknownMessage } from "./components/UnknownMessage.component.jsx";
 import { SystemMessage } from "./components/SystemMessage.component.jsx";
 import { ToolMessage } from "./components/ToolMessage.component.jsx";
-import { ModelChooser } from "./components/ModelChooser.component.jsx";
 import { ProviderConnections } from "./components/ProviderConnections.component.jsx";
-import { ModelDownloader } from "./components/ModelDownloader.component.jsx";
 import { SessionBrowser } from "./components/SessionBrowser.component.jsx";
 import { Welcome } from "./components/Welcome.component.jsx";
 import { ToastNotifications } from "./components/ToastNotifications.component.jsx";
@@ -92,8 +89,12 @@ export function agentTimelineEntries(message, generating = false) {
   return entries;
 }
 
-export function App({
+export function ChatShell({
   state,
+  welcomeCommands,
+  modelCommand,
+  Composer,
+  modelDialog,
   workspace,
   syntaxStyle,
   onSubmit,
@@ -101,17 +102,8 @@ export function App({
   onRemoveQueuedMessage,
   onStopGeneration,
   onDraftChange,
-  onCloseModelModal,
-  onOpenProviders,
   onCloseProviders,
   onProviderAction,
-  onDownloadSelectedModel,
-  onCancelModelDownload,
-  onSearchHuggingFace,
-  onSetRouterClassifier,
-  onSetRouterTierWorker,
-  onDeleteModel,
-  onRefreshRouterWorkerModels,
   onOpenSessions,
   onCloseSessions,
   onRestoreSession,
@@ -265,7 +257,7 @@ export function App({
           contentOptions={{ flexDirection: "column" }}
         >
           {showWelcome ? (
-            <Welcome />
+            <Welcome commands={welcomeCommands} />
           ) : (
             state.messages.flatMap((message, index) => {
               const generating = state.generating && index === state.messages.length - 1;
@@ -395,31 +387,13 @@ export function App({
       )}
       {state.providerModal && (
         <ProviderConnections
+          modelCommand={modelCommand}
           {...state.providerModal}
           onClose={onCloseProviders}
           onAction={onProviderAction}
         />
       )}
-      {state.modelModal?.mode === "chooser" && (
-        <ModelChooser
-          {...state.modelModal}
-          onClose={onCloseModelModal}
-          onSetClassifier={onSetRouterClassifier}
-          onSetTierWorker={onSetRouterTierWorker}
-          onDeleteModel={onDeleteModel}
-          onRefreshWorkerModels={onRefreshRouterWorkerModels}
-          onOpenProviders={onOpenProviders}
-        />
-      )}
-      {state.modelModal?.mode === "download" && (
-        <ModelDownloader
-          {...state.modelModal}
-          onClose={onCloseModelModal}
-          onDownloadSelected={onDownloadSelectedModel}
-          onCancelDownload={onCancelModelDownload}
-          onSearch={onSearchHuggingFace}
-        />
-      )}
+      {modelDialog}
     </box>
   );
 }

@@ -9,23 +9,24 @@ Ask a quick question, investigate a tricky bug, or plan a complex change: Xarab 
 ### Why Xarab?
 
 - **Match the worker to the work.** Route straightforward requests differently from tasks that need deeper investigation or specialized reasoning.
-- **Build your own model lineup.** Configure the classifier and each tier independently; use local GGUF, OpenAI, or OpenRouter models.
+- **Build your own model lineup.** Configure remote models independently for the classifier and each tier, or run a single local or remote model.
 - **Get work done in your project.** Workers can inspect and edit files, search code, run commands, and use optional web research tools.
 - **Pick up where you left off.** Sessions autosave, can be browsed and restored, and can be compacted to carry important context forward.
 - **Inspect and tune routing.** See the chosen tier and rationale, then evaluate a local classifier against labeled examples.
 
 ## Try it
 
-**Requirements:** Node.js 26.4.0 or newer. Xarab's terminal UI is built with [OpenTUI](https://github.com/anomalyco/opentui) (`@opentui/core` and `@opentui/react`). The default local GGUF classifier and any local GGUF workers require a machine supported by [`node-llama-cpp`](https://github.com/withcatai/node-llama-cpp).
+**Requirements:** Node.js 26.4.0 or newer. Xarab's terminal UI is built with [OpenTUI](https://github.com/anomalyco/opentui) (`@opentui/core` and `@opentui/react`). Local GGUF inference in `xarab-one` requires a machine supported by [`node-llama-cpp`](https://github.com/withcatai/node-llama-cpp).
 
 ```sh
 npm install
-npm start
+npm start       # xarab: tier routing
+npm run start:one # xarab-one: one model
 ```
 
-Installation does not download or configure a classifier. Choose a classifier in `/route`, or browse and download local models explicitly with `/download`. Local models are stored under `~/.xarab/models` by default.
+In `xarab`, use `/route` to configure a remote classifier and tier workers. In `xarab-one`, use `/model` to select one model and `/download` to browse local GGUF models. Both share session history, but only one process can open a given session at a time. You can run multiple `xarab` instances and one `xarab-one` instance concurrently.
 
-**First run:** open `/connect` to connect OpenAI or add an OpenRouter API key, then open `/route` to choose a classifier and assign workers to tiers. Or choose local GGUF models in `/route` and try Xarab without connecting a provider. Send a request to see the selected tier and its rationale. Type `/help` for the command list.
+**First run:** open `/connect` to connect OpenAI or add an OpenRouter API key, then open `/route` to choose a classifier and assign workers to tiers. To run locally without connecting a provider, start `xarab-one` and choose a GGUF model in `/model`. Send a request to see the selected tier and its rationale. Type `/help` for the command list.
 
 ## The three-tier system
 
@@ -41,11 +42,11 @@ Tiers describe **the capability needed to do the work well**—not a fixed model
 
 ### Configure your lineup
 
-In **`/route`**, choose a classifier, select Tier 1, 2, or 3, then assign a worker model. The classifier and each worker are independent assignments: mix providers or use one provider throughout. In the routing dialog, Tab or Left/Right switches sections, Up/Down selects, and Enter applies or assigns. Use `/download` to find local GGUF models on Hugging Face.
+In **`/route`**, choose a classifier, select Tier 1, 2, or 3, then assign a worker model. The classifier and each worker are independent assignments: mix providers or use one provider throughout. In the routing dialog, Tab or Left/Right switches sections, Up/Down selects, and Enter applies or assigns.
 
 - **OpenAI:** Sign in through `/connect`.
 - **OpenRouter:** Add an API key through `/connect`.
-- **Local GGUF:** Choose a model in `/route` or find one with `/download`.
+- **Local GGUF (`xarab-one` only):** Choose a model in `/model` or find one with `/download`. To delete a downloaded model, highlight it in `/model`, press Ctrl+D, and confirm. Deleting the selected idle model clears the selection.
 
 Models are stored in `~/.xarab/models` by default; set `XARAB_MODELS_DIR` to use another directory. Xarab keeps its configuration, credentials, and sessions under `~/.xarab/`.
 
@@ -53,7 +54,8 @@ Models are stored in `~/.xarab/models` by default; set `XARAB_MODELS_DIR` to use
 
 - `/route` — configure the classifier and tier workers
 - `/connect` — connect or manage providers
-- `/download [query]` — search Hugging Face for local models
+- `/model` — select the model in `xarab-one`
+- `/download [query]` — search Hugging Face for local models (`xarab-one` only)
 - `/sessions` — browse saved conversations; `Ctrl+O` also opens the session browser
 - `/new [name]`, `/save [name]` — start or save a session
 - `/compact` — summarize older conversation to make room for continued work
@@ -68,12 +70,12 @@ Xarab also supports local and remote MCP tools with global and workspace configu
 
 ## Isolated tasks and automatic titles
 
-The main worker can delegate work through the `task` tool. Each task is classified independently and runs with a clean conversation context, the supplied brief and selected context, and a built-in `general-purpose` or project agent profile. Tasks can use existing tools but cannot delegate further. MCP servers must be explicitly selected and remain subject to existing consent rules. Progress appears in the task card; the completion summary returns to the main worker. Stopping the parent turn cancels its task, but does not undo edits or other effects already performed.
+The main worker can delegate work through the `task` tool. In `xarab`, each task is classified independently. In `xarab-one`, a remote subagent uses the main model; local models do not expose the native `task` tool. Every task runs with a clean conversation context, the supplied brief and selected context, and a built-in `general-purpose` or project agent profile. Tasks can use existing tools but cannot delegate further. MCP servers must be explicitly selected and remain subject to existing consent rules. Progress appears in the task card; the completion summary returns to the main worker. Stopping the parent turn cancels its task, but does not undo edits or other effects already performed.
 
-One agentic task may run per session at a time. Local worker inference uses one shared adapter: utility and main-worker requests wait for capacity, while an agentic task fails explicitly if the local worker is already occupied (including a local parent waiting for its child). The classifier retains its independent runtime. These limits do not provide file isolation or a sandbox.
+One agentic task may run per session at a time. Local main-worker and background utility requests share a llama.cpp runtime. These limits do not provide file isolation or a sandbox.
 
 Session titles are generated automatically from at most the first 4,096 characters of the first user message, with the existing first-message title as fallback. Both classification and title generation may use configured remote providers and consume usage. Manual titles are preserved. To disable automatic generation, set `"automaticTitles": false` in `~/.xarab/config.json` before starting Xarab.
-After a successful response, Xarab may generate a suggested next message from up to the last 4,096 characters of the response. Press Tab in an empty composer to insert it; edit it before sending if desired. This tool-free utility uses the tier 1 worker, which may send the excerpt to a remote provider and consume usage. Set `"automaticSuggestions": false` in `~/.xarab/config.json` to disable it.
+After a successful response, Xarab may generate a suggested next message from up to the last 4,096 characters of the response. Press Tab in an empty composer to insert it; edit it before sending if desired. This tool-free utility uses the tier 1 worker in `xarab` or the selected model in `xarab-one`, which may send the excerpt to a remote provider and consume usage. Set `"automaticSuggestions": false` in `~/.xarab/config.json` to disable it.
 
 
 Project profiles use `.agents/agents/<name>.md`; this is a Xarab format, not a cross-tool standard. Malformed or oversized profiles are reported and skipped without blocking valid profiles or the built-in agent. Directory-level discovery errors still prevent task invocation. Profiles are rediscovered on invocation. See the [task agent guide](docs/task-agents.md) for the profile format and usage.

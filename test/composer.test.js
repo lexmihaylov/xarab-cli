@@ -22,7 +22,7 @@ test("shows loading and queue guidance while messages are queued", async () => {
     assert.match(frame, /QUEUED · 1/);
     assert.match(frame, /Ctrl\+X remove newest/);
     assert.match(frame, /1  Follow-up request/);
-    assert.match(frame, /Enter queue/);
+    assert.match(frame, /Enter\s+queue/);
     assert.match(frame, /Esc stop/);
     assert.doesNotMatch(frame, /PgUp|PgDn/);
     assert.match(frame, /█████/);
@@ -94,12 +94,12 @@ test("ready hotkey guidance appears on the right at narrow and standard widths",
     try {
       await view.flush();
       const frame = view.captureCharFrame();
-      assert.match(frame, /Ctrl\+J newline/);
-      assert.match(frame, /Enter send/);
+      assert.match(frame, /Shift\+Enter\s+newline/);
+      assert.match(frame, /Enter\s+send/);
       assert.doesNotMatch(frame, /PgUp|PgDn|Esc stop/);
-      const hintLine = frame.split("\n").find((line) => line.includes("Enter send"));
+      const hintLine = frame.split("\n").find((line) => line.includes("Shift+Enter newline"));
       assert.ok(hintLine);
-      assert.ok(hintLine.indexOf("Ctrl+J newline") > 2, hintLine);
+      assert.ok(hintLine.indexOf("Shift+Enter newline") > 2, hintLine);
     } finally {
       await act(async () => view.dispose());
     }
@@ -119,12 +119,12 @@ test("generating hotkey guidance appears beside the loading indicator at narrow 
   try {
     await view.flush();
     const frame = view.captureCharFrame();
-    assert.match(frame, /Enter queue/);
-    assert.match(frame, /Ctrl\+J newline/);
+    assert.match(frame, /Enter\s+queue/);
+    assert.match(frame, /Shift\+Enter\s+newline/);
     assert.match(frame, /Esc stop/);
     assert.match(frame, /█████/);
     const hintLine = frame.split("\n").find((line) => line.includes("Enter queue"));
-    assert.ok(hintLine.indexOf("Enter queue") > 5, hintLine);
+    assert.ok(hintLine.indexOf("Shift+Enter") > 5, hintLine);
   } finally {
     await act(async () => view.dispose());
   }
@@ -176,7 +176,7 @@ test("indicator stays visible and animates only while generating across transiti
     try {
       await view.flush();
       assert.match(view.captureCharFrame(), /\[█████\]/);
-      assert.match(view.captureCharFrame(), /Enter send/);
+      assert.match(view.captureCharFrame(), /Enter\s+send/);
       const idle = colors();
       await wait();
       await view.flush();
@@ -204,7 +204,7 @@ test("indicator stays visible and animates only while generating across transiti
       await act(async () => setStatus({ generating: false, disabled: false }));
       await view.flush();
       assert.match(view.captureCharFrame(), /\[█████\]/);
-      assert.match(view.captureCharFrame(), /Enter send/);
+      assert.match(view.captureCharFrame(), /Enter\s+send/);
     } finally {
       await act(async () => view.dispose());
     }

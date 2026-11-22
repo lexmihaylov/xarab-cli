@@ -63,19 +63,20 @@ const wordmark = Array.from({ length: 4 }, (_, row) =>
   ).join(""),
 );
 
-export function Welcome() {
+const defaultCommands = [
+  ["/connect", "Connect a provider"],
+  ["/route", "Set up routing and workers"],
+  ["/download", "Find local models"],
+  ["/sessions", "Browse saved sessions"],
+  ["/clear", "Clear the conversation"],
+  ["/new", "Start a new session"],
+  ["!command", "Run a shell command"],
+];
+
+export function Welcome({ commands = defaultCommands }) {
   const { width, height } = useTerminalDimensions();
   const availableRows = Math.max(0, height - appChromeRows);
   const showWordmark = width >= 40 && availableRows >= 14;
-  const commands = [
-    ["/connect", "Connect a provider"],
-    ["/route", "Set up routing and workers"],
-    ["/download", "Find local models"],
-    ["/sessions", "Browse saved sessions"],
-    ["/clear", "Clear the conversation"],
-    ["/new", "Start a new session"],
-    ["!command", "Run a shell command"],
-  ];
   const logoRows = showWordmark ? 4 : 1;
   const margin = availableRows >= 10 ? 1 : 0;
   const visibleCommands = Math.max(0, availableRows - logoRows - margin - 1);

@@ -15,7 +15,7 @@ Xarab's CLI uses JSON configuration under `~/.xarab`. Use `/connect` to manage p
 | `~/.xarab/xarab.log` | Diagnostic log. |
 | `<workspace>/.xarab/mcp.json` | Workspace MCP server definitions, read for each worker run. |
 
-Config writes create parent directories and use a temporary file and rename; newly written files use mode `0600`. Missing configuration files use defaults; malformed JSON is not treated as a missing file. When `routing.conf` is absent and legacy routing fields exist in `config.json`, the store migrates them to the routing file and removes them from the general file. A legacy `classifierModel` string is interpreted as a local classifier path.
+Config writes create parent directories and use a temporary file and rename; newly written files use mode `0600`. Missing configuration files use defaults; malformed JSON is not treated as a missing file. When `routing.conf` is absent and legacy routing fields exist in `config.json`, `xarab` migrates them to the routing file and removes them from the general file. `xarab-one` reads and writes `config.json` without opening `routing.conf` or migrating routing settings. Both commands coordinate writes to `config.json` so one does not overwrite unrelated settings saved by the other. A legacy `classifierModel` string is interpreted as a local classifier path.
 
 ## General settings
 
@@ -48,16 +48,16 @@ OpenAI uses ChatGPT sign-in rather than the `apiKeys.openai` field. OpenRouter r
 
 ```json
 {
-  "classifier": { "provider": "local", "model": "/absolute/path/classifier.gguf" },
+  "classifier": { "provider": "openrouter", "model": "provider/classifier-id" },
   "tierWorkers": {
     "1": { "provider": "openrouter", "model": "provider/model-id" },
     "2": { "provider": "openai", "model": "your-openai-model-id" },
-    "3": { "provider": "local", "model": "/absolute/path/worker.gguf" }
+    "3": { "provider": "openrouter", "model": "provider/worker-id" }
   }
 }
 ```
 
-Supported providers are `local`, `openai`, and `openrouter`. Classifiers require a nonempty model; tier workers need a model to run. Local models are paths, resolved to absolute paths relative to the process working directory; remote models are IDs. Invalid tier entries fall back to the default for that tier. When a separate routing file exists, its tier map is normalized independently; a missing or invalid classifier there falls back to the classifier loaded from the general file.
+`xarab` accepts only `openai` and `openrouter` for classifiers and tier workers. Assignments use remote model IDs. Previously saved local assignments are preserved during migration but cannot run; replace them in `/route`. Invalid tier entries fall back to the default for that tier. When a separate routing file exists, its tier map is normalized independently; a missing or invalid classifier there falls back to the classifier loaded from the general file.
 
 ## Environment variables
 

@@ -19,7 +19,7 @@ Read the current implementation rather than relying only on this document:
 - `src/components/SessionBrowser.component.jsx`: search/list/details focus areas, narrow layouts, scrolling, and confirmations.
 - `src/components/ProviderConnections.component.jsx`: compact provider selection and actions.
 - `src/components/Composer.component.jsx`: textarea integration, draft handling, wrapping, and key bindings.
-- `src/App.component.jsx` and `src/agent/controller.js`: focus boundaries, global shortcuts, modal state, and lifecycle.
+- `src/ChatShell.component.jsx`, the app components in `src/single/` and `src/tiered/` and `src/agent/controller.js`: focus boundaries, global shortcuts, modal state, and lifecycle.
 - Relevant tests under `test/`, including `dialogs.test.js` and `session-browser.test.js`.
 
 Inspect the closest analogue and its state ownership before proposing a layout. Verify OpenTUI APIs locally; do not invent props or keyboard events.

@@ -8,6 +8,7 @@ async function setup(t, downloadFile, onStateChange) {
   const root = await mkdtemp("/tmp/opencode/xarab-download-controller-");
   const configPath = path.join(root, "config.json");
   const controller = createAssistantController({
+    mode: "single",
     root,
     modelsDir: path.join(root, "models"),
     configPath,

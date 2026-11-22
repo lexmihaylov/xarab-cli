@@ -55,6 +55,7 @@ test("controller streams bounded previews, reconciles calls, and settles abandon
   t.after(() => rm(temporary, { recursive: true, force: true }));
   let live;
   const controller = createAssistantController({
+    mode: "single",
     automaticTitles: false,
     automaticSuggestions: false,
     root: temporary,
@@ -100,8 +101,7 @@ test("controller streams bounded previews, reconciles calls, and settles abandon
   });
   await controller.initialize();
   t.after(() => controller.shutdown());
-  await controller.setRouterClassifier(path.join(temporary, "router.gguf"));
-  await controller.setRouterTierWorker(1, { provider: "local", model: "small.gguf" });
+  await controller.setSingleModel({ provider: "local", model: "small.gguf" });
   await controller.submit("inspect");
   const parts = controller.getState().messages.find((m) => m.type === "agent").parts;
   assert.equal(live, 4096);

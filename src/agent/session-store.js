@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, open, readFile, readdir, rename, stat, unlink } from "node:fs/promises";
 import path from "node:path";
+import { acquireSessionLock } from "./session-lock.js";
 
 const ID = /^[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12}$/i;
 const MAX_BYTES = 32 * 1024 * 1024;
@@ -161,10 +162,45 @@ function stripTaskActivity(record) {
 
 export function createSessionStore(directory) {
   let queue = Promise.resolve();
+  const leases = new WeakMap();
   const file = (id) => {
-    if (!ID.test(id)) throw new Error("Invalid session ID");
+    if (!text(id) || !ID.test(id)) throw new Error("Invalid session ID");
     return path.join(directory, `${id}.json`);
   };
+
+  async function acquire(id) {
+    file(id); // Validate before using the ID as a lock filename.
+    const unlock = await acquireSessionLock(directory, id);
+    const state = { id, writing: false };
+    const lease = Object.freeze({
+      release() {
+        if (state.writing) throw new Error("Cannot release a session lock during a write");
+        unlock();
+        leases.delete(lease);
+      },
+    });
+    leases.set(lease, state);
+    return lease;
+  }
+
+  function mutate(id, lease, action) {
+    const operation = queue
+      .catch(() => {})
+      .then(async () => {
+        const owned = lease ?? (await acquire(id));
+        const state = leases.get(owned);
+        if (!state || state.id !== id) throw new Error("Invalid or released session lock");
+        state.writing = true;
+        try {
+          return await action();
+        } finally {
+          state.writing = false;
+          if (lease == null) owned.release();
+        }
+      });
+    queue = operation;
+    return operation;
+  }
   async function load(id) {
     const filename = file(id);
     if ((await stat(filename)).size > MAX_BYTES) throw new Error("Session file is too large");
@@ -173,50 +209,42 @@ export function createSessionStore(directory) {
   return {
     directory,
     load,
-    save(record) {
+    acquire,
+    save(record, lease) {
       const snapshot = stripTaskActivity(JSON.parse(JSON.stringify(record)));
       validateSession(snapshot);
       const data = `${JSON.stringify(snapshot)}\n`;
       if (Buffer.byteLength(data) > MAX_BYTES)
         return Promise.reject(new Error("Session is too large to save"));
-      const operation = queue
-        .catch(() => {})
-        .then(async () => {
-          await mkdir(directory, { recursive: true, mode: 0o700 });
-          const temporary = path.join(directory, `.${snapshot.id}.${randomUUID()}.tmp`);
-          let handle;
-          try {
-            handle = await open(temporary, "wx", 0o600);
-            await handle.writeFile(data);
-            await handle.sync();
-            await handle.close();
-            handle = undefined;
-            await rename(temporary, file(snapshot.id));
-          } finally {
-            await handle?.close();
-            await unlink(temporary).catch((error) => {
-              if (error.code !== "ENOENT") throw error;
-            });
-          }
-          return snapshot;
-        });
-      queue = operation;
-      return operation;
-    },
-    async remove(id) {
-      const filename = file(id);
-      const operation = queue
-        .catch(() => {})
-        .then(async () => {
-          try {
-            await unlink(filename);
-          } catch (error) {
+      return mutate(snapshot.id, lease, async () => {
+        const temporary = path.join(directory, `.${snapshot.id}.${randomUUID()}.tmp`);
+        let handle;
+        try {
+          handle = await open(temporary, "wx", 0o600);
+          await handle.writeFile(data);
+          await handle.sync();
+          await handle.close();
+          handle = undefined;
+          await rename(temporary, file(snapshot.id));
+        } finally {
+          await handle?.close();
+          await unlink(temporary).catch((error) => {
             if (error.code !== "ENOENT") throw error;
-          }
-          return true;
-        });
-      queue = operation;
-      return operation;
+          });
+        }
+        return snapshot;
+      });
+    },
+    async remove(id, lease) {
+      const filename = file(id);
+      return mutate(id, lease, async () => {
+        try {
+          await unlink(filename);
+        } catch (error) {
+          if (error.code !== "ENOENT") throw error;
+        }
+        return true;
+      });
     },
     async list(workspace) {
       await queue.catch(() => {});

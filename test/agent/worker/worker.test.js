@@ -9,6 +9,38 @@ function createConfig(tierWorker) {
   };
 }
 
+test("explicit worker policy selects assignments while remote-only remains enforced", async () => {
+  let assignment = { provider: "openai", model: "policy-model" };
+  const worker = createWorker({
+    configStore: {},
+    workerPolicy: {
+      getAssignment: () => assignment,
+      assignmentError: () => "policy error",
+      assignmentEvent: (_tier, value) => ({ ...value, policy: true }),
+      prepareTierAdjustment: () => false,
+      suppressTaskTools: () => false,
+    },
+    remoteOnly: true,
+    openAIAdapterFactory: () => ({ run: async ({ model }) => model }),
+    localAdapterFactory: () => ({ run: async () => {} }),
+  });
+  try {
+    let reported;
+    assert.equal(
+      await worker.complete({ onAssignment: (value) => (reported = value) }),
+      "policy-model",
+    );
+    assert.deepEqual(reported, { ...assignment, policy: true });
+    assignment = { provider: "local", model: "local" };
+    await assert.rejects(worker.run({ input: "hello" }), /Local workers are unavailable/);
+    await assert.rejects(worker.complete({}), /Local workers are unavailable/);
+    assignment = undefined;
+    await assert.rejects(worker.complete({}), /policy error/);
+  } finally {
+    await worker.dispose();
+  }
+});
+
 test("worker selects an adapter and passes the configured model", async () => {
   const calls = [];
   const adapter = { run: async (request) => (calls.push(request), { ok: true }) };
@@ -499,6 +531,133 @@ test("same-model effort variants forward effort and permit tier adjustment", asy
     assert.equal(typeof calls[0].tools.tier_adjustment.handler, "function");
     await worker.complete({ tier: 2, input: "hello" });
     assert.equal(calls[1].effort, "high");
+  } finally {
+    await worker.dispose();
+  }
+});
+
+test("single model overrides tier and completion, and local removes native task before catalog", async () => {
+  const calls = [];
+  let catalog = 0;
+  let selected = { provider: "local", model: "selected" };
+  const worker = createWorker({
+    configStore: createConfig({ provider: "openai", model: "tier" }),
+    getSingleModel: () => selected,
+    openAIAdapterFactory: () => ({ run: async (request) => calls.push(request) }),
+    localAdapterFactory: () => ({ run: async (request) => calls.push(request) }),
+    toolRuntime: {
+      taskTool: {
+        description: "task marker",
+        catalog: async () => {
+          catalog++;
+          return "profiles";
+        },
+      },
+    },
+  });
+  try {
+    let assignment;
+    await worker.run({
+      tier: 3,
+      input: "hello",
+      onTierAdjustment: () => {},
+      onAssignment: (value) => (assignment = value),
+    });
+    assert.deepEqual(assignment, { provider: "local", model: "selected" });
+    assert.equal(calls[0].model, "selected");
+    assert.equal(calls[0].tools.task, undefined);
+    assert.equal(calls[0].tools.tier_adjustment, undefined);
+    assert.doesNotMatch(calls[0].instructions, /task marker|tier_adjustment/);
+    assert.equal(catalog, 0);
+    selected = { provider: "openai", model: "remote" };
+    await worker.complete({ tier: 1, input: [] });
+    assert.equal(calls[1].model, "remote");
+    selected = null;
+    await assert.rejects(worker.complete({ tier: 1 }), /Choose a worker model/);
+  } finally {
+    await worker.dispose();
+  }
+});
+
+test("worker renders delegation and tier guidance from the registered tools", async () => {
+  for (const scenario of [
+    { name: "single local", single: "local", task: true, delegation: false, adjustment: false },
+    { name: "single remote", single: "openai", task: true, delegation: true, adjustment: false },
+    {
+      name: "single remote without task",
+      single: "openai",
+      task: false,
+      delegation: false,
+      adjustment: false,
+    },
+    { name: "tiered", task: true, delegation: true, adjustment: true },
+    { name: "tiered without task", task: false, delegation: false, adjustment: true },
+  ]) {
+    let request;
+    const adapter = {
+      run: async (value) => {
+        request = value;
+      },
+    };
+    const worker = createWorker({
+      configStore: {
+        getTierWorker: (tier) => ({ provider: "openai", model: `tier-${tier}` }),
+      },
+      ...(scenario.single
+        ? { getSingleModel: () => ({ provider: scenario.single, model: "single" }) }
+        : {}),
+      openAIAdapterFactory: () => adapter,
+      localAdapterFactory: () => adapter,
+      toolRuntime: scenario.task
+        ? { taskTool: { description: "delegate marker", handler: async () => ({}) } }
+        : {},
+    });
+    try {
+      await worker.run({ tier: 1, input: "hello", onTierAdjustment: async () => ({}) });
+      assert.equal(Boolean(request.tools.task), scenario.delegation, scenario.name);
+      assert.equal(Boolean(request.tools.tier_adjustment), scenario.adjustment, scenario.name);
+      assert.equal(
+        request.instructions.includes("## Delegation"),
+        scenario.delegation,
+        scenario.name,
+      );
+      assert.equal(
+        request.instructions.includes("- task: delegate marker"),
+        scenario.delegation,
+        scenario.name,
+      );
+      assert.equal(
+        request.instructions.includes("## Tier adjustment"),
+        scenario.adjustment,
+        scenario.name,
+      );
+      assert.equal(
+        request.instructions.includes("- tier_adjustment:"),
+        scenario.adjustment,
+        scenario.name,
+      );
+      assert.doesNotMatch(request.instructions, /\{\{[#/{]/, scenario.name);
+      assert.equal(typeof request.tools.read_file.handler, "function", scenario.name);
+    } finally {
+      await worker.dispose();
+    }
+  }
+});
+
+test("remoteOnly rejects configured local workers for turns and utility calls", async () => {
+  const worker = createWorker({
+    configStore: createConfig({ provider: "local", model: "local" }),
+    remoteOnly: true,
+    openAIAdapterFactory: () => assert.fail("Remote adapter must not run a local assignment"),
+    localAdapterFactory: () => assert.fail("Local adapter must not start in tier mode"),
+  });
+  try {
+    assert.equal(worker.getTierInfo(1).configured, false);
+    await assert.rejects(worker.run({ tier: 1, input: "hello" }), /Local workers are unavailable/);
+    await assert.rejects(
+      worker.complete({ tier: 1, input: "hello" }),
+      /Local workers are unavailable/,
+    );
   } finally {
     await worker.dispose();
   }

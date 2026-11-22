@@ -5,13 +5,11 @@ import { getTheme } from "../utils/theme-engine.js";
 
 const colors = getTheme().colors;
 
-const commandOptions = [
+export const commandOptions = [
   { command: "/help", description: "Show available commands" },
-  { command: "/route", description: "Configure router and tier workers" },
   { command: "/connect", description: "Connect to AI providers" },
   { command: "/mcp logout", description: "Remove stored MCP OAuth credentials" },
 
-  { command: "/download", description: "Search Hugging Face for models" },
   { command: "/sessions", description: "Restore, switch, or delete sessions" },
   { command: "/new", description: "Start a new session" },
   { command: "/save", description: "Save or name this session" },
@@ -22,6 +20,7 @@ const commandOptions = [
 
 export function Composer({
   flexShrink = 0,
+  availableCommands = commandOptions,
   sessionId,
   draft,
   messageSuggestion,
@@ -51,7 +50,7 @@ export function Composer({
   const sessionRef = useRef(sessionId);
   const suggestions =
     !disabled && value.startsWith("/") && !value.includes("\n")
-      ? commandOptions.filter(({ command }) => command.startsWith(value.toLowerCase()))
+      ? availableCommands.filter(({ command }) => command.startsWith(value.toLowerCase()))
       : [];
   const selectedSuggestion = suggestions[Math.min(suggestionIndex, suggestions.length - 1)];
   const commandColumnWidth =

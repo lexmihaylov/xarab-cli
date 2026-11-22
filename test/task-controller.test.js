@@ -11,6 +11,7 @@ async function setup(t, run, options = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), "xarab-task-controller-"));
   const states = [];
   const controller = createAssistantController({
+    mode: "tiered",
     root,
     workspace: root,
     instructionFiles: [],
@@ -30,7 +31,7 @@ async function setup(t, run, options = {}) {
     await rm(root, { recursive: true, force: true });
   });
   await controller.initialize();
-  await controller.setRouterClassifier(path.join(root, "classifier.gguf"));
+  await controller.setRouterClassifier({ provider: "openai", model: "classifier" });
   await controller.setRouterTierWorker(1, { provider: "openai", model: "test" });
   return { controller, states, root };
 }

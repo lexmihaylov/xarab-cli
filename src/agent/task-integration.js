@@ -5,7 +5,9 @@ import { COMMAND_RISK_INSTRUCTIONS, parseCommandRisk } from "./command-risk.js";
 
 export function createTaskIntegration({
   workspace,
+  taskPolicy,
   classify,
+  getSingleModel,
   createWorker,
   getSession,
   applyTitle,
@@ -15,9 +17,11 @@ export function createTaskIntegration({
   notify,
   titlesEnabled,
 }) {
-  const runner = createTaskRunner({ classify, createWorker });
+  const runner = createTaskRunner({ classify, createWorker, getSingleModel, taskPolicy });
   const validationRunner = createTaskRunner({
+    taskPolicy,
     classify,
+    getSingleModel,
     createWorker: (options) => createWorker({ ...options, mode: "validation" }),
     timeoutMs: 15_000,
   });
@@ -66,6 +70,7 @@ export function createTaskIntegration({
 
   return {
     taskTool,
+    hasPendingWork: () => runner.hasPendingWork() || validationRunner.hasPendingWork(),
     async assessCommand({ command, workspace, signal }) {
       const result = await validationRunner.run({
         mode: "utility",

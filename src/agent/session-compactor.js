@@ -7,6 +7,8 @@ export function createSessionCompactor({
   setCurrentAgentMessage,
   addMessage,
   classifyForRouting,
+  missingModelMessage = (classification) =>
+    `Tier ${classification.tier} has no valid worker model; choose a remote model in /route.`,
   worker,
   sessionChanged,
   notify,
@@ -84,7 +86,7 @@ export function createSessionCompactor({
     if (!tierWorker?.configured) {
       addMessage({
         type: "system",
-        message: `Tier ${classification.tier} has no worker model selected.`,
+        message: missingModelMessage(classification),
         severity: "warning",
       });
       return;
@@ -101,7 +103,7 @@ export function createSessionCompactor({
         onRetry: ({ attempt, maxRetries }) =>
           updateStatus(`Compaction timed out; retrying (${attempt}/${maxRetries})…`),
         request: {
-          tier: classification.tier,
+          tier: classification?.tier,
           instructions:
             "Create a concise Markdown summary of the conversation for a future assistant. Preserve the user's goals, decisions, constraints, important facts, files, commands, errors, and unresolved work. Do not address the user or add commentary; return only the summary.",
           input: [{ role: "user", content: `Conversation to compact:\n\n${transcript}` }],

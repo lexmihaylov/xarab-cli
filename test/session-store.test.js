@@ -49,7 +49,7 @@ test("sessions round-trip model history, tool results, drafts and pending shell 
   assert.deepEqual(await store.load(record.id), record);
   assert.equal((await stat(path.join(store.directory, `${record.id}.json`))).mode & 0o777, 0o600);
   assert.equal((await stat(store.directory)).mode & 0o777, 0o700);
-  assert.deepEqual(await readdir(store.directory), [`${record.id}.json`]);
+  assert.deepEqual((await readdir(store.directory)).sort(), [".locks", `${record.id}.json`]);
 });
 
 test("task activity stays in memory and legacy activity is ignored on load", async (t) => {
@@ -93,7 +93,7 @@ test("queued saves snapshot immediately and the latest completed save wins atomi
   await second;
   await store.flush();
   assert.equal((await store.load(record.id)).draft.value, "second");
-  assert.deepEqual(await readdir(store.directory), [`${record.id}.json`]);
+  assert.deepEqual((await readdir(store.directory)).sort(), [".locks", `${record.id}.json`]);
 });
 
 test("removal deletes atomically queued sessions, tolerates missing files, and rejects bad IDs", async (t) => {
@@ -105,7 +105,7 @@ test("removal deletes atomically queued sessions, tolerates missing files, and r
   await removal;
   await store.flush();
   await assert.rejects(store.load(record.id), /ENOENT/);
-  assert.deepEqual(await readdir(store.directory), []);
+  assert.deepEqual(await readdir(store.directory), [".locks"]);
   assert.equal(await store.remove(record.id), true, "removing a missing session is a no-op");
   await assert.rejects(store.remove("../../config"), /Invalid session ID/);
 });
@@ -152,7 +152,7 @@ test("storage failures are reported without leaving temporary files", async (t) 
   const directory = path.join(root, "blocked");
   await writeFile(directory, "keep");
   const store = createSessionStore(directory);
-  await assert.rejects(store.save(newSession(root)), /EEXIST/);
+  await assert.rejects(store.save(newSession(root)), { code: "ENOTDIR" });
   assert.equal(await readFile(directory, "utf8"), "keep");
 });
 
