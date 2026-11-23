@@ -36,6 +36,70 @@ async function setup(t, run, options = {}) {
   return { controller, states, root };
 }
 
+for (const validationFails of [false, true]) {
+  test(`local shell validation ${validationFails ? "falls back to manual approval" : "runs while the parent awaits the tool"}`, { timeout: 3000 }, async (t) => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "xarab-local-validation-"));
+    const approval = Promise.withResolvers();
+    let parentRunning = false;
+    let validationRequest;
+    let commandResult;
+    const controller = createAssistantController({
+      mode: "single",
+      root,
+      workspace: root,
+      configPath: path.join(root, "config.json"),
+      instructionFiles: [],
+      automaticTitles: false,
+      automaticSuggestions: false,
+      onStateChange(state) {
+        if (state.questionDialog?.commandApproval)
+          approval.resolve(state.questionDialog.commandApproval);
+      },
+      localWorkerAdapterFactory: () => ({
+        async run(request) {
+          parentRunning = true;
+          try {
+            commandResult = await request.tools.run_command.handler(
+              { command: "printf validation-fixture" },
+              { callId: "shell-call", signal: request.signal },
+            );
+            request.onText("Done");
+          } finally {
+            parentRunning = false;
+          }
+        },
+        async runValidation(request) {
+          validationRequest = { ...request, parentRunning };
+          if (validationFails) throw new Error("No memory for validation context");
+          request.onText('{"risk":"low","scope":"workspace","reason":"Prints a string."}');
+        },
+      }),
+    });
+    t.after(async () => {
+      await controller.shutdown();
+      await rm(root, { recursive: true, force: true });
+    });
+    const model = path.join(root, "fixture.gguf");
+    await controller.initialize();
+    await controller.setSingleModel({ provider: "local", model });
+    const turn = controller.submit("Run the fixture command");
+    const dialog = await Promise.race([approval.promise, turn.then(() => null)]);
+    if (validationFails) {
+      assert.equal(dialog?.risk, "unclassified");
+      assert.equal(dialog?.command, "printf validation-fixture");
+      controller.answerQuestions(null);
+    } else {
+      assert.equal(dialog, null);
+    }
+    await turn;
+    assert.equal(validationRequest?.parentRunning, true);
+    assert.equal(validationRequest.model, model);
+    assert.deepEqual(validationRequest.tools, {});
+    const output = commandResult?.output ?? commandResult;
+    assert.match(output, validationFails ? /Command denied/ : /stdout:\nvalidation-fixture/);
+  });
+}
+
 test("parent task tool runs an isolated child, streams progress, and returns summary without recursion", async (t) => {
   let childRequest;
   const { controller, states } = await setup(

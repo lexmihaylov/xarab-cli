@@ -1,6 +1,130 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createLocalLlamaWorkerAdapter } from "../../../src/agent/worker/local-llama-worker-adapter.js";
+import { createLocalWorkerRuntime } from "../../../src/agent/worker/local-worker-runtime.js";
+
+test("nested validation uses an isolated cached context on the same weights", async () => {
+  const events = [];
+  let contexts = 0;
+  let failAllocation = false;
+  const adapter = createLocalLlamaWorkerAdapter({
+    modelRuntime: {
+      async getLlama() {
+        return {
+          async loadModel({ modelPath }) {
+            events.push(`load:${modelPath}`);
+            return {
+              async createContext() {
+                if (failAllocation) throw new Error("No memory for validation context");
+                const id = ++contexts;
+                return {
+                  getSequence: () => ({
+                    id,
+                    clearHistory() {},
+                    dispose() {
+                      events.push(`sequence:${id}`);
+                    },
+                  }),
+                  dispose() {
+                    events.push(`context:${id}`);
+                  },
+                };
+              },
+              dispose() {
+                events.push(`model:${modelPath}`);
+              },
+            };
+          },
+        };
+      },
+      createSession({ contextSequence }) {
+        return {
+          async prompt(input, { functions }) {
+            events.push(`prompt:${contextSequence.id}:${input}`);
+            if (input === "parent") await functions.assess.handler({});
+            else assert.deepEqual(functions, {});
+          },
+          dispose() {
+            events.push(`session:${contextSequence.id}`);
+          },
+        };
+      },
+    },
+  });
+  await adapter.run({
+    model: "a.gguf",
+    input: "parent",
+    tools: {
+      assess: {
+        async handler() {
+          await assert.rejects(adapter.runValidation({ model: "b.gguf" }), /not ready/);
+          failAllocation = true;
+          await assert.rejects(adapter.runValidation({ model: "a.gguf" }), /No memory/);
+          failAllocation = false;
+          await adapter.runValidation({ model: "a.gguf", input: "first" });
+          await adapter.runValidation({ model: "a.gguf", input: "second" });
+          return "done";
+        },
+      },
+    },
+  });
+  // The tool wrapper catches handler errors, so assert the whole trace too.
+  const replacement = adapter.run({ model: "b.gguf", input: "replacement" });
+  await assert.rejects(adapter.runValidation({ model: "a.gguf" }), /not ready/);
+  await replacement;
+  await adapter.dispose();
+  assert.deepEqual(events, [
+    "load:a.gguf", "prompt:1:parent", "prompt:2:first", "session:2", "sequence:2",
+    "prompt:2:second", "session:2", "sequence:2", "session:1", "sequence:1",
+    "context:2", "context:1", "model:a.gguf", "load:b.gguf", "prompt:3:replacement",
+    "session:3", "sequence:3", "context:3", "model:b.gguf",
+  ]);
+});
+
+test("runtime keeps validation reserved through cancelled context creation and drains it before shutdown", async () => {
+  const creating = Promise.withResolvers();
+  const created = Promise.withResolvers();
+  const events = [];
+  const runtime = createLocalWorkerRuntime(() => createLocalLlamaWorkerAdapter({
+    modelRuntime: {
+      async getLlama() {
+        return {
+          async loadModel() {
+            return {
+              async createContext({ createSignal }) {
+                creating.resolve(createSignal);
+                await created.promise;
+                return {
+                  getSequence() { assert.fail("Cancelled validation must not start a session"); },
+                  dispose() { events.push("context"); },
+                };
+              },
+              dispose() { events.push("model"); },
+            };
+          },
+        };
+      },
+    },
+  }));
+  const validator = runtime.createAdapter({ validate: true });
+  const controller = new AbortController();
+  const pending = validator.run({ model: "a.gguf", signal: controller.signal });
+  const nativeSignal = await creating.promise;
+  controller.abort(new Error("Validation deadline"));
+  assert.equal(nativeSignal.aborted, true);
+  assert.equal(runtime.isBusy(), true);
+  await assert.rejects(validator.run({ model: "a.gguf" }), /busy/);
+  await assert.rejects(runtime.createAdapter().run({ model: "b.gguf" }), /busy/);
+  await assert.rejects(runtime.unload(), /busy/);
+  const queued = runtime.createAdapter({ wait: true }).run({ model: "b.gguf" });
+  const closing = runtime.dispose();
+  await assert.rejects(queued, /closed/);
+  assert.deepEqual(events, []);
+  created.resolve();
+  await assert.rejects(pending, /Validation deadline/);
+  await closing;
+  assert.deepEqual(events, ["context", "model"]);
+});
 
 test("local worker releases its sequence after successful and failed turns", async () => {
   let reserved = false;

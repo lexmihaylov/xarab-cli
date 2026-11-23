@@ -115,11 +115,15 @@ export function createAssistantController({
     },
     notify,
     updateStatus,
-    isBusy: () => turnRunning || generating || isRouting || commandRunning,
+    isBusy: () => turnRunning || generating || isRouting || commandRunning || localRuntime.isBusy(),
   });
   const classifyForRouting = routing.classifyForRouting;
   const localRuntime = createLocalWorkerRuntime(localWorkerAdapterFactory, {
-    isUnavailable: () => modelManager.isModelDeletionPending(),
+    unavailableReason: () => {
+      if (isShuttingDown) return "The assistant is shutting down.";
+      if (modelManager.isModelDeletionPending()) return "Wait for local model deletion to finish.";
+      if (changingSingleModel) return "Wait for the model change to finish.";
+    },
   });
   let sessionController;
   const tasks = createTaskIntegration({
@@ -133,7 +137,8 @@ export function createAssistantController({
         openAIAdapterFactory,
         openRouterAdapterFactory: () =>
           createOpenRouterWorkerAdapter({ getApiKey: () => configStore.getApiKey("openrouter") }),
-        localAdapterFactory: () => localRuntime.createAdapter({ wait: mode === "utility" }),
+        localAdapterFactory: () =>
+          localRuntime.createAdapter({ wait: mode === "utility", validate: mode === "validation" }),
         getCredentials: () => openAIAuth.getCredentials(),
         getOpenAIStatus: () => openAIAuth.getStatus(),
         workspace,
@@ -811,9 +816,12 @@ export function createAssistantController({
       }
       await activeDownload?.promise;
       await modelDeletion;
-      await routing.currentClassifier?.()?.dispose?.();
-      await worker.dispose();
-      await localRuntime.dispose();
+      try {
+        await routing.currentClassifier?.()?.dispose?.();
+        await worker.dispose();
+      } finally {
+        await localRuntime.dispose();
+      }
     })();
     return shutdownPromise;
   }

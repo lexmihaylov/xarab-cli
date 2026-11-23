@@ -69,6 +69,61 @@ test("single-mode deletion waits for unload, blocks new work, and clears the sel
   assert.match(controller.getState().status, /choose a model/i);
 });
 
+test("cancelled validation keeps the model in use until the adapter finishes", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "xarab-validation-drain-"));
+  const model = path.join(root, "selected.gguf");
+  await writeFile(model, "fixture");
+  const validating = Promise.withResolvers();
+  const finish = Promise.withResolvers();
+  let disposed = false;
+  const controller = createAssistantController({
+    mode: "single",
+    root,
+    workspace: root,
+    modelsDir: root,
+    configPath: path.join(root, "config.json"),
+    automaticTitles: false,
+    automaticSuggestions: false,
+    instructionFiles: [],
+    localWorkerAdapterFactory: () => ({
+      async run({ tools, signal }) {
+        await tools.run_command.handler({ command: "printf fixture" }, { signal });
+      },
+      async runValidation({ signal }) {
+        validating.resolve(signal);
+        await finish.promise;
+      },
+      dispose() {
+        disposed = true;
+      },
+    }),
+  });
+  t.after(async () => {
+    finish.resolve();
+    await controller.shutdown();
+    await rm(root, { recursive: true, force: true });
+  });
+  await controller.initialize();
+  await controller.setSingleModel({ provider: "local", model });
+  await controller.submit("/model");
+  const turn = controller.submit("Check the fixture");
+  const signal = await validating.promise;
+  controller.stopGeneration();
+  await turn;
+  assert.equal(signal.aborted, true);
+  assert.equal(controller.getState().questionDialog, undefined);
+  await controller.setSingleModel({ provider: "openai", model: "replacement" });
+  assert.equal(controller.getState().singleModel.model, model);
+  assert.equal((await controller.deleteModel(model)).deleted, false);
+  assert.equal(await readFile(model, "utf8"), "fixture");
+  const closing = controller.shutdown();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(disposed, false);
+  finish.resolve();
+  await closing;
+  assert.equal(disposed, true);
+});
+
 test("tiered controllers do not expose local model deletion", async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "xarab-tier-delete-"));
   const controller = createAssistantController({

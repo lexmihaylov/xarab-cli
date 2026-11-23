@@ -3,7 +3,10 @@ import { createSessionTitleTask } from "./session-title-task.js";
 import { createTaskTool } from "./worker/tools/task-tool.js";
 import { COMMAND_RISK_INSTRUCTIONS, parseCommandRisk } from "./command-risk.js";
 
+export const COMMAND_VALIDATION_TIMEOUT_MS = 60_000;
+
 export function createTaskIntegration({
+  validationTimeoutMs = COMMAND_VALIDATION_TIMEOUT_MS,
   workspace,
   taskPolicy,
   classify,
@@ -23,7 +26,7 @@ export function createTaskIntegration({
     classify,
     getSingleModel,
     createWorker: (options) => createWorker({ ...options, mode: "validation" }),
-    timeoutMs: 15_000,
+    timeoutMs: validationTimeoutMs,
   });
   const titleTask = createSessionTitleTask({ runner, getSession, applyTitle, warn });
   let suggestionController;

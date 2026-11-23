@@ -7,20 +7,25 @@ export function createLocalLlamaWorkerAdapter({
   maxTokens = 4096,
 } = {}) {
   let model;
-  let context;
-  let loading;
-  let disposed = false;
+  const contexts = {};
+  const active = {};
+  const lifetime = new AbortController();
   let disposal;
 
-  async function load(modelPath) {
-    if (!modelPath) throw new Error("A local worker model path is required.");
-    if (model?.modelPath === modelPath) return model;
+  async function loadContext(modelPath, lane, signal) {
+    const options = { contextSize, flashAttention: true, createSignal: signal };
+    if (model?.modelPath === modelPath) {
+      contexts[lane] ??= await model.value.createContext(options);
+      return contexts[lane];
+    }
     await disposeResources();
+    signal.throwIfAborted();
     const llama = await modelRuntime.getLlama({ logLevel: "warn" });
-    const loadedModel = await llama.loadModel({ modelPath });
-    let loadedContext;
+    signal.throwIfAborted();
+    const loadedModel = await llama.loadModel({ modelPath, loadSignal: signal });
     try {
-      loadedContext = await loadedModel.createContext({ contextSize, flashAttention: true });
+      signal.throwIfAborted();
+      contexts[lane] = await loadedModel.createContext(options);
     } catch (error) {
       await Promise.resolve()
         .then(() => loadedModel.dispose?.())
@@ -28,36 +33,62 @@ export function createLocalLlamaWorkerAdapter({
       throw error;
     }
     model = { modelPath, value: loadedModel };
-    context = loadedContext;
-    return model;
+    return contexts[lane];
   }
 
   async function disposeResources() {
-    const currentContext = context;
+    const { primary, validation } = contexts;
     const currentModel = model?.value;
-    context = undefined;
+    delete contexts.primary;
+    delete contexts.validation;
     model = undefined;
     try {
-      await currentContext?.dispose?.();
+      try {
+        await validation?.dispose?.();
+      } finally {
+        await primary?.dispose?.();
+      }
     } finally {
       await currentModel?.dispose?.();
     }
   }
 
-  async function run({
-    model: modelPath,
-    instructions,
-    input,
-    tools = {},
-    signal,
-    onText = () => {},
-    onEvent = () => {},
-  }) {
-    if (disposed) throw new Error("Local worker has been disposed.");
-    if (signal?.aborted) throw abortError();
-    if (!modelPath) throw new Error("A local worker model path is required.");
-    await load(modelPath);
-    if (signal?.aborted) throw abortError();
+  async function start(request, lane) {
+    if (lifetime.signal.aborted) throw new Error("Local worker has been disposed.");
+    request.signal?.throwIfAborted();
+    if (!request.model) throw new Error("A local worker model path is required.");
+    if (active[lane] || (lane === "primary" && active.validation))
+      throw new Error("Local worker is busy.");
+    if (lane === "validation") {
+      if (Object.keys(request.tools ?? {}).length)
+        throw new Error("Local command validation cannot use tools.");
+      // An active worker may be suspended inside a shell tool. Never wait for it,
+      // reload its weights, or fall back to its sequence from the validation lane.
+      if (
+        active.primary &&
+        (active.primary.modelPath !== request.model || model?.modelPath !== request.model)
+      )
+        throw new Error("The requested local model is not ready for command validation.");
+    }
+    const signal = request.signal
+      ? AbortSignal.any([request.signal, lifetime.signal])
+      : lifetime.signal;
+    const done = Promise.resolve().then(() => generate({ ...request, signal }, lane));
+    active[lane] = { modelPath: request.model, done };
+    try {
+      return await done;
+    } finally {
+      delete active[lane];
+    }
+  }
+
+  async function generate(
+    { model: modelPath, instructions, input, tools = {}, signal, onText = () => {}, onEvent = () => {} },
+    lane,
+  ) {
+    signal.throwIfAborted();
+    const context = await loadContext(modelPath, lane, signal);
+    signal.throwIfAborted();
 
     const functions = Object.fromEntries(
       Object.entries(tools).map(([name, tool]) => [
@@ -66,7 +97,7 @@ export function createLocalLlamaWorkerAdapter({
           description: tool.description,
           params: tool.params ?? { type: "object", properties: {} },
           async handler(params) {
-            if (signal?.aborted) throw abortError();
+            signal.throwIfAborted();
             const callId = `local_${randomUUID()}`;
             onEvent({ type: "tool_call", name, callId, arguments: params });
             let result;
@@ -85,6 +116,7 @@ export function createLocalLlamaWorkerAdapter({
     let session;
     try {
       await contextSequence.clearHistory();
+      signal.throwIfAborted();
       session = modelRuntime.createSession({
         contextSequence,
         systemPrompt: instructions,
@@ -98,8 +130,11 @@ export function createLocalLlamaWorkerAdapter({
           maxParallelFunctionCalls: 1,
           maxTokens,
           signal,
-          onTextChunk: onText,
+          onTextChunk: (text) => {
+            if (!signal.aborted) onText(text);
+          },
         });
+        signal.throwIfAborted();
         if (typeof result === "string") return {};
         return result ?? {};
       } catch (error) {
@@ -116,14 +151,15 @@ export function createLocalLlamaWorkerAdapter({
   }
 
   return {
-    run,
-    async dispose() {
+    run: (request) => start(request, "primary"),
+    runValidation: (request) => start(request, "validation"),
+    dispose() {
       if (disposal) return disposal;
-      disposed = true;
       disposal = (async () => {
-        await loading;
+        await Promise.allSettled(Object.values(active).map(({ done }) => done));
         await disposeResources();
       })();
+      lifetime.abort();
       return disposal;
     },
   };
@@ -190,10 +226,4 @@ function normalizeToolResult(result) {
   if (result && typeof result === "object" && typeof result.ok === "boolean")
     return { ...result, output: String(result.output ?? "") };
   return { ok: true, output: typeof result === "string" ? result : JSON.stringify(result) };
-}
-
-function abortError() {
-  const error = new Error("Generation was cancelled.");
-  error.name = "AbortError";
-  return error;
 }

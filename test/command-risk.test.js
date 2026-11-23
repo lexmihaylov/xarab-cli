@@ -7,7 +7,10 @@ import {
 } from "../src/agent/command-risk.js";
 import { createShellTool } from "../src/agent/worker/tools/shell-tool.js";
 import { createQuestionRequest } from "../src/agent/question-request.js";
-import { createTaskIntegration } from "../src/agent/task-integration.js";
+import {
+  COMMAND_VALIDATION_TIMEOUT_MS,
+  createTaskIntegration,
+} from "../src/agent/task-integration.js";
 
 const assessment = (risk, scope = "workspace") => ({ risk, scope, reason: "Test assessment" });
 test("risk guidance does not treat routine temporary-file use as risky by itself", () => {
@@ -129,6 +132,26 @@ test("validator failure offers approval; abort during approval overrides consent
     },
   });
   assert.equal(result.approved, false);
+});
+
+test("command validation uses the 60-second default timeout", async () => {
+  assert.equal(COMMAND_VALIDATION_TIMEOUT_MS, 60_000);
+  const tasks = createTaskIntegration({
+    validationTimeoutMs: 10,
+    classify: async () => ({ valid: true, tier: 1 }),
+    createWorker: () => ({
+      getTierInfo: () => ({ configured: true }),
+      complete: () => new Promise(() => {}),
+    }),
+  });
+  try {
+    await assert.rejects(
+      tasks.assessCommand({ command: "ls", workspace: "/work" }),
+      /Command validation failed/,
+    );
+  } finally {
+    await tasks.shutdown();
+  }
 });
 
 test("risk assessment uses an isolated utility completion and strict parser", async () => {

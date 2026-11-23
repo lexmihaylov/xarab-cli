@@ -1,12 +1,27 @@
-// One local worker adapter per application. Concurrent work fails explicitly
-// rather than loading duplicate models or deadlocking a parent awaiting a child.
-export function createLocalWorkerRuntime(factory, { isUnavailable = () => false } = {}) {
+// One local worker adapter per application. Only command validation can overlap
+// an existing run; ordinary local work still uses a single slot.
+export function createLocalWorkerRuntime(factory, { unavailableReason = () => undefined } = {}) {
   let adapter;
-  let busy = false;
-  let closed = false;
   let work;
+  let validation;
+  let unloading;
+  let closed = false;
   let disposal;
+  const shutdown = new AbortController();
   const waiters = new Set();
+  const isBusy = () => Boolean(work || validation || unloading);
+
+  function wakeWaiters() {
+    for (const finish of [...waiters]) finish();
+  }
+
+  function checkAvailable(signal) {
+    if (closed) throw new Error("Local worker runtime is closed.");
+    signal?.throwIfAborted();
+    const reason = unavailableReason();
+    if (reason) throw new Error(reason);
+  }
+
   function idle(signal) {
     return new Promise((resolve, reject) => {
       const finish = () => {
@@ -15,56 +30,87 @@ export function createLocalWorkerRuntime(factory, { isUnavailable = () => false 
         resolve();
       };
       const abort = () => {
-        signal?.removeEventListener("abort", abort);
+        signal.removeEventListener("abort", abort);
         waiters.delete(finish);
-        reject(signal.reason ?? new Error("Local task cancelled."));
+        reject(signal.reason);
       };
       waiters.add(finish);
       signal?.addEventListener("abort", abort, { once: true });
       if (signal?.aborted) abort();
     });
   }
+
   return {
-    createAdapter({ wait = false } = {}) {
+    createAdapter({ wait = false, validate = false } = {}) {
       return {
         async run(request) {
-          while (busy && wait && !closed) await idle(request.signal);
-          if (isUnavailable()) throw new Error("Wait for local model deletion to finish.");
-          if (closed) throw new Error("Local worker runtime is closed.");
-          if (request.signal?.aborted)
-            throw request.signal.reason ?? new Error("Local task cancelled.");
-          if (busy)
+          checkAvailable(request.signal);
+          if (validate) {
+            if (validation || unloading) throw new Error("Local command validation is busy.");
+            if (Object.keys(request.tools ?? {}).length)
+              throw new Error("Local command validation cannot use tools.");
+            const signal = request.signal
+              ? AbortSignal.any([request.signal, shutdown.signal])
+              : shutdown.signal;
+            validation = Promise.resolve().then(() => {
+              checkAvailable(signal);
+              adapter ??= factory();
+              if (!adapter.runValidation) throw new Error("Local command validation is unavailable.");
+              return adapter.runValidation({ ...request, signal });
+            });
+            try {
+              return await validation;
+            } finally {
+              validation = undefined;
+              wakeWaiters();
+            }
+          }
+
+          while (isBusy() && wait) {
+            await idle(request.signal);
+            checkAvailable(request.signal);
+          }
+          if (isBusy())
             throw new Error("Local worker is busy; retry after the active local run finishes.");
-          busy = true;
-          try {
+          work = Promise.resolve().then(() => {
+            checkAvailable(request.signal);
             adapter ??= factory();
-            work = Promise.resolve(adapter.run(request));
+            return adapter.run(request);
+          });
+          try {
             return await work;
           } finally {
             work = undefined;
-            busy = false;
-            for (const finish of [...waiters]) finish();
+            wakeWaiters();
           }
         },
         // Individual workers do not own the shared runtime.
         async dispose() {},
       };
     },
-    isBusy: () => busy,
+    isBusy,
     async unload() {
-      if (busy) throw new Error("The local worker is busy.");
+      if (closed) throw new Error("Local worker runtime is closed.");
+      if (isBusy()) throw new Error("The local worker is busy.");
       const previous = adapter;
       adapter = undefined;
-      await previous?.dispose?.();
+      unloading = Promise.resolve().then(() => previous?.dispose?.());
+      try {
+        await unloading;
+      } finally {
+        unloading = undefined;
+        wakeWaiters();
+      }
     },
     dispose() {
       if (disposal) return disposal;
       closed = true;
-      for (const finish of [...waiters]) finish();
       disposal = (async () => {
-        await work?.catch(() => {});
+        await Promise.allSettled([work, validation, unloading]);
         await adapter?.dispose?.();
       })();
+      shutdown.abort(new Error("Local worker runtime is shutting down."));
+      wakeWaiters();
       return disposal;
     },
   };
