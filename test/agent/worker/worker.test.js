@@ -102,6 +102,10 @@ test("main and agentic preparation preserve shared tools and isolate profile ins
       taskInstructions: "Profile marker",
       mcpServers: [],
     });
+    await worker.complete({ tier: 1, instructions: "Utility", input: "utility" });
+    assert.equal(calls[0].reusableInstructions, true);
+    assert.equal(calls[1].reusableInstructions, true);
+    assert.equal(calls[2].reusableInstructions, false);
     assert.doesNotMatch(calls[0].instructions, /Subtask response discipline/);
     assert.match(calls[0].instructions, /## Research-first workflow/);
     assert.doesNotMatch(calls[0].instructions, /You are Xarab's delegated agent/);

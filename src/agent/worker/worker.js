@@ -123,6 +123,7 @@ export function createWorker({
   }) {
     return {
       input: buildWorkerHistory(history, input, assignment?.provider),
+      reusableInstructions: true,
       instructions: systemPromptFor({
         workspace,
         instructionFiles,
@@ -195,6 +196,7 @@ export function createWorker({
       tier,
       instructions,
       input,
+      reusableInstructions: false,
       tools: {},
       inactivityRetries: 0,
       allowEmptyResponse: true,

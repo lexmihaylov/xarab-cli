@@ -17,6 +17,7 @@ export function createOpenAIResponsesWorkerAdapter({
     model,
     effort,
     instructions,
+    reusableInstructions = false,
     input,
     tools = {},
     sessionID,
@@ -36,7 +37,11 @@ export function createOpenAIResponsesWorkerAdapter({
       parameters: tool.params ?? { type: "object", properties: {} },
       strict: false,
     }));
+    const useDeveloperInstructions =
+      reusableInstructions && Boolean(instructions) && /^gpt-6\.2(?:-|$)/i.test(model);
     let requestInput = serializeWorkerInput(input);
+    if (useDeveloperInstructions)
+      requestInput = [{ role: "developer", content: instructions }, ...requestInput];
     let completedResponse;
     let sawToolCall = false;
     let socket;
@@ -64,7 +69,7 @@ export function createOpenAIResponsesWorkerAdapter({
         if (signal?.aborted) throw abortError();
         const requestBody = {
           model,
-          instructions,
+          ...(!useDeveloperInstructions ? { instructions } : {}),
           input: requestInput,
           tools: apiTools,
           parallel_tool_calls: true,

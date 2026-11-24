@@ -23,6 +23,18 @@ test("sums completion usage and preserves cache/reasoning subsets", () => {
   assert.equal(formatTokenUsage(total), "32 in / 10 out / 42 total · 16 cached · 4 reasoning");
 });
 
+test("reports cached tokens from GPT-6.2 provider usage", () => {
+  const providerUsage = {
+    input_tokens: 12,
+    output_tokens: 2,
+    total_tokens: 14,
+    input_tokens_details: { cached_tokens: 9 },
+  };
+  const usage = addTokenUsage(undefined, providerUsage);
+  assert.equal(usage.cached_tokens, 9);
+  assert.match(formatTokenUsage(usage), /9 cached/);
+});
+
 test("missing or malformed usage is not interpreted as zero", () => {
   assert.equal(addTokenUsage(undefined, undefined), undefined);
   const current = { input_tokens: 1, output_tokens: 2, total_tokens: 3 };

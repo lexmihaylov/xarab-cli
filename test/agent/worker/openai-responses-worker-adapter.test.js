@@ -339,6 +339,126 @@ test("lists models returned by the Codex catalog", async () => {
 });
 
 test("streams a Responses result with required privacy settings", async () => {
+test("reusable instructions use an initial developer message only for gpt-6.2 models", async (t) => {
+  for (const transport of ["HTTP", "WebSocket"]) {
+    for (const model of ["gpt-6.2", "GPT-6.2-codex"]) {
+      await t.test(`${transport} ${model} keeps developer instructions through tool continuation`, async () => {
+        const requests = [];
+        let turn = 0;
+        const respond = (body) => {
+          requests.push(body);
+          if (++turn === 1)
+            return [
+              {
+                type: "response.completed",
+                response: {
+                  id: "response-1",
+                  output: [
+                    { type: "function_call", name: "inspect", call_id: "call-1", arguments: "{}" },
+                  ],
+                },
+              },
+            ];
+          return [
+            {
+              type: "response.output_text.delta",
+              delta: "done",
+            },
+            {
+              type: "response.completed",
+              response: {
+                output: [{ type: "message", content: [{ type: "output_text", text: "done" }] }],
+                usage: {
+                  input_tokens: 12,
+                  output_tokens: 2,
+                  total_tokens: 14,
+                  input_tokens_details: { cached_tokens: 9 },
+                },
+              },
+            },
+          ];
+        };
+        const adapter = createOpenAIResponsesWorkerAdapter({
+          getCredentials: async () => ({ access_token: "token", account_id: "account" }),
+          fetchImpl: async (_url, options) =>
+            streamedResponse(respond(JSON.parse(options.body))),
+          webSocketFactory: () => new TestWebSocket(respond),
+        });
+        const result = await adapter.run({
+          model,
+          instructions: "Reusable system guidance",
+          reusableInstructions: true,
+          input: "hello",
+          ...(transport === "WebSocket" ? { sessionID: "session" } : {}),
+          tools: { inspect: { handler: async () => "inspected" } },
+        });
+        assert.equal(requests.length, 2);
+        assert.equal(requests[0].instructions, undefined);
+        assert.deepEqual(requests[0].input[0], {
+          role: "developer",
+          content: "Reusable system guidance",
+        });
+        assert.equal(requests[1].instructions, undefined);
+        assert.deepEqual(
+          requests[1].input,
+          transport === "WebSocket"
+            ? [{ type: "function_call_output", call_id: "call-1", output: "inspected" }]
+            : [
+                { role: "developer", content: "Reusable system guidance" },
+                { role: "user", content: "hello" },
+                {
+                  type: "function_call",
+                  name: "inspect",
+                  call_id: "call-1",
+                  arguments: "{}",
+                },
+                { type: "function_call_output", call_id: "call-1", output: "inspected" },
+              ],
+        );
+        assert.deepEqual(result.usage, {
+          input_tokens: 12,
+          output_tokens: 2,
+          total_tokens: 14,
+          input_tokens_details: { cached_tokens: 9 },
+        });
+      });
+    }
+  }
+});
+
+test("non-target models and utility calls retain top-level instructions", async () => {
+  for (const options of [
+    { model: "gpt-6.1", reusableInstructions: true },
+    { model: "utility-model", reusableInstructions: true, allowEmptyResponse: true },
+  ]) {
+    let body;
+    const adapter = createOpenAIResponsesWorkerAdapter({
+      getCredentials: async () => ({ access_token: "token", account_id: "account" }),
+      fetchImpl: async (_url, request) => {
+        body = JSON.parse(request.body);
+        return streamedResponse([
+          {
+            type: "response.completed",
+            response: {
+              output: options.allowEmptyResponse
+                ? []
+                : [{ type: "message", content: [{ type: "output_text", text: "ok" }] }],
+            },
+          },
+        ]);
+      },
+    });
+    await adapter.run({
+      ...options,
+      instructions: "System instructions",
+      input: "hello",
+    });
+    assert.equal(body.instructions, "System instructions");
+    assert.deepEqual(body.input, [{ role: "user", content: "hello" }]);
+  }
+});
+
+
   const requests = [];
   const chunks = [];
   const finalResponse = { id: "response-1", output: [{ type: "message" }] };
