@@ -26,6 +26,52 @@ test("single chooser selects a local model", async () => {
   }
 });
 
+test("single chooser keeps filtered and scrolled models inside its pane", async () => {
+  for (const height of [24, 18]) {
+    const models = Array.from({ length: 40 }, (_, i) => ({
+      provider: "local",
+      id: `/model-${i}.gguf`,
+      name: `item-${String(i).padStart(2, "0")}`,
+    }));
+    const view = await testRender(
+      React.createElement(SingleModelChooser, {
+        models,
+        onClose() {},
+        onSetSingleModel() {},
+      }),
+      { width: 80, height },
+    );
+    const checkFrame = (selected) => {
+      const lines = view.captureCharFrame().split("\n");
+      const title = lines.findIndex((line) => line.includes("MODEL SELECTION"));
+      const heading = lines.findIndex((line) => /^\s*│\s*MODEL\s*│/.test(line));
+      const bottom = lines.findIndex((line) => line.includes("╰") && line.includes("╯"));
+      const selectedLine = lines.findIndex((line) => line.includes(`› local · ${selected}`));
+      assert.ok(title >= 0 && heading > title && bottom > heading, lines.join("\n"));
+      assert.ok(selectedLine > heading && selectedLine < bottom, lines.join("\n"));
+      assert.ok(
+        lines.every((line, i) => !line.includes("item-") || (i > heading && i < bottom)),
+        lines.join("\n"),
+      );
+    };
+    try {
+      await view.flush();
+      checkFrame("item-00");
+      for (let i = 0; i < 25; i++) await act(async () => view.mockInput.pressArrow("down"));
+      await view.flush();
+      checkFrame("item-25");
+      await act(async () => view.mockInput.typeText("item-3"));
+      await view.flush();
+      checkFrame("item-30");
+      for (let i = 0; i < 9; i++) await act(async () => view.mockInput.pressArrow("down"));
+      await view.flush();
+      checkFrame("item-39");
+    } finally {
+      await view.dispose();
+    }
+  }
+});
+
 test("single chooser confirms or cancels local deletion and ignores remote deletion", async () => {
   const deleted = [];
   let closed = 0;

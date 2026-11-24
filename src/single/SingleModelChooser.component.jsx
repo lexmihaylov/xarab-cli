@@ -120,10 +120,12 @@ export function SingleModelChooser({
         minHeight={0}
         paddingX={1}
       >
-        <text fg={colors.accent} bold>
+        <text fg={colors.accent} bold height={1} flexShrink={0}>
           MODEL
         </text>
         <input
+          height={1}
+          flexShrink={0}
           value={query}
           placeholder="Search models…"
           focused={!deleteTarget}
@@ -134,9 +136,13 @@ export function SingleModelChooser({
           width="100%"
         />
         <scrollbox
+          key={query}
           ref={scroll}
           flexGrow={1}
+          flexShrink={1}
+          flexBasis={0}
           minHeight={0}
+          overflow="hidden"
           scrollY
           scrollX={false}
           contentOptions={{ flexDirection: "column" }}
