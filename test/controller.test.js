@@ -206,6 +206,42 @@ test("publishes a running shell message before command completion", async (t) =>
   await controller.shutdown();
 });
 
+test("manual shell output is published while the command is running", async (t) => {
+  const temporary = await mkdtemp("/tmp/opencode/xarab-shell-stream-test-");
+  t.after(() => rm(temporary, { recursive: true, force: true }));
+  const controller = createAssistantController({
+    mode: "tiered",
+    automaticTitles: false,
+    root: temporary,
+    workspace: temporary,
+    instructionFiles: [],
+    configPath: path.join(temporary, "config.json"),
+  });
+  await controller.initialize();
+  const pending = controller.submit("!printf early; printf problem >&2; sleep 2; printf late");
+  try {
+    let running;
+    const deadline = Date.now() + 1500;
+    while (Date.now() < deadline) {
+      running = controller.getState().messages.at(-1);
+      if (running.message.includes("early") && running.message.includes("problem")) break;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    assert.equal(running.running, true);
+    assert.match(running.message, /stdout:\nearly/);
+    assert.match(running.message, /stderr:\nproblem/);
+    assert.doesNotMatch(running.message, /late/);
+  } finally {
+    await pending;
+    await controller.shutdown();
+  }
+  const completed = controller.getState().messages.at(-1);
+  assert.equal(completed.running, undefined);
+  assert.match(completed.message, /exit code 0/);
+  assert.match(completed.message, /earlylate/);
+  assert.match(completed.message, /problem/);
+});
+
 test("controller reassesses remaining work and records adjustment outcomes", async (t) => {
   for (const outcome of ["approved", "same-model", "rejected"]) {
     await t.test(outcome, async (t) => {

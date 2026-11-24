@@ -1,8 +1,9 @@
 import { spawn } from "node:child_process";
+import { StringDecoder } from "node:string_decoder";
 
 export function runShellCommand(
   command,
-  { cwd = process.cwd(), timeoutMs = 30_000, maxOutputBytes = 64 * 1024, signal } = {},
+  { cwd = process.cwd(), timeoutMs = 30_000, maxOutputBytes = 64 * 1024, signal, onOutput } = {},
 ) {
   const abortSignal = signal;
   return new Promise((resolve) => {
@@ -64,7 +65,8 @@ export function runShellCommand(
     signal?.addEventListener("abort", cancel, { once: true });
     if (signal?.aborted) cancel();
 
-    function collect(target, chunk) {
+    const decoders = { stdout: new StringDecoder("utf8"), stderr: new StringDecoder("utf8") };
+    function collect(target, chunk, stream) {
       const remaining = maxOutputBytes - outputBytes;
       if (remaining <= 0) {
         truncated = true;
@@ -74,14 +76,16 @@ export function runShellCommand(
       const kept = chunk.subarray(0, remaining);
       target.push(kept);
       outputBytes += kept.length;
+      const text = decoders[stream].write(kept);
+      if (text) onOutput?.(stream, text);
       if (kept.length < chunk.length) {
         truncated = true;
         cancel();
       }
     }
 
-    child.stdout.on("data", (chunk) => collect(stdout, chunk));
-    child.stderr.on("data", (chunk) => collect(stderr, chunk));
+    child.stdout.on("data", (chunk) => collect(stdout, chunk, "stdout"));
+    child.stderr.on("data", (chunk) => collect(stderr, chunk, "stderr"));
     child.on("error", (error) => {
       spawnError = error.message;
     });
@@ -99,6 +103,10 @@ export function runShellCommand(
       clearTimeout(killTimer);
       // The close event's signal is distinct from the caller's AbortSignal.
       abortSignal?.removeEventListener("abort", cancel);
+      for (const stream of ["stdout", "stderr"]) {
+        const text = decoders[stream].end();
+        if (text) onOutput?.(stream, text);
+      }
       resolve({
         code,
         signal,

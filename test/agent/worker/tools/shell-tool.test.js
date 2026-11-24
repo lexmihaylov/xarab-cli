@@ -4,6 +4,24 @@ import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { createShellTool } from "../../../../src/agent/worker/tools/shell-tool.js";
+test("streams command output before completion and flushes it before the completed event", async () => {
+  const events = [];
+  const tool = createShellTool({
+    assessCommand: async () => ({ risk: "low", scope: "workspace", reason: "Test fixture" }),
+    onEvent: (event) => events.push(event),
+  });
+  const result = await tool.handler({
+    command: `node -e "process.stdout.write('first'); setTimeout(() => process.stderr.write('last'), 200)"`,
+  });
+  assert.equal(events[0].type, "started");
+  assert.equal(events.at(-1).type, "completed");
+  const outputEvents = events.filter((event) => event.type === "output");
+  assert.ok(outputEvents.length >= 2);
+  assert.equal(outputEvents.map((event) => event.text).join(""), "firstlast");
+  assert.equal(events.at(-1).stdout, "first");
+  assert.equal(events.at(-1).stderr, "last");
+  assert.match(result, /Exit code: 0/);
+});
 
 test("runs a command from the workspace", async () => {
   const workspace = await mkdtemp(path.join(os.tmpdir(), "xarab-agent-shell-"));

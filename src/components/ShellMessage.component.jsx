@@ -15,7 +15,7 @@ const severityStyle = {
 export function ShellMessage({ message }) {
   const command = typeof message.command === "string" ? message.command : "";
   const isRunning = message.running === true;
-  const output = isRunning ? "Executing…" : shellSummary(message.message);
+  const output = shellSummary(message.message) || (isRunning ? "Executing…" : "");
   const summary = [command && `> ${command}`, output].filter(Boolean).join("\n\n");
   const status = severityStyle[message.severity] ?? severityStyle.info;
   const isError = message.severity === "error";

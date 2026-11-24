@@ -48,6 +48,22 @@ test("renders a loading indicator while a shell command is running", async () =>
   }
 });
 
+test("renders streamed output while a shell command is running", async () => {
+  const view = await render({
+    type: "shell",
+    command: "npm test",
+    message: "first test passed",
+    running: true,
+  });
+  try {
+    const frame = view.captureCharFrame();
+    assert.match(frame, /> npm test/);
+    assert.match(frame, /first test passed/);
+    assert.doesNotMatch(frame, /Executing…/);
+  } finally {
+    await view.dispose();
+  }
+});
 test("renders warning and error shell statuses with their output", async (t) => {
   for (const severity of ["warning", "error"]) {
     await t.test(severity, async () => {

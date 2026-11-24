@@ -60,8 +60,27 @@ export function createCommandHandler({
     updateStatus("Running command…");
     const shellMessage = addMessage({ type: "shell", command, message: "", running: true });
     await new Promise((resolve) => setImmediate(resolve));
+    let stdout = "";
+    let stderr = "";
+    let outputTimer;
+    function publishOutput() {
+      outputTimer = undefined;
+      shellMessage.message = [stdout && `stdout:\n${stdout}`, stderr && `stderr:\n${stderr}`]
+        .filter(Boolean)
+        .join("\n\n");
+      notify();
+    }
     try {
-      const result = await runShellCommand(command, { cwd: workspace });
+      const result = await runShellCommand(command, {
+        cwd: workspace,
+        onOutput(stream, text) {
+          if (stream === "stdout") stdout += text;
+          else if (stream === "stderr") stderr += text;
+          else return;
+          outputTimer ??= setTimeout(publishOutput, 50);
+        },
+      });
+      if (outputTimer) clearTimeout(outputTimer);
       shellMessage.message = formatShellResult(command, result, workspace);
       shellMessage.severity =
         result.timedOut || result.error ? "error" : result.code === 0 ? "info" : "warning";
@@ -72,6 +91,7 @@ export function createCommandHandler({
       sessionChanged();
       notify();
     } finally {
+      if (outputTimer) clearTimeout(outputTimer);
       setCommandRunning(false);
       updateStatus("Ready");
     }

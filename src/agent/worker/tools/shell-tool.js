@@ -43,12 +43,26 @@ export function createShellTool({
       if (!authorization.approved) return authorization.reason;
       if (signal?.aborted) return "Command cancelled.";
       onEvent({ type: "started", command });
+      let pendingOutput = "";
+      let outputTimer;
+      function publishOutput() {
+        outputTimer = undefined;
+        if (!pendingOutput) return;
+        onEvent({ type: "output", text: pendingOutput });
+        pendingOutput = "";
+      }
       const result = await runShellCommand(command, {
         cwd: root,
         timeoutMs: COMMAND_TIMEOUT_MS,
         maxOutputBytes: MAX_AGENT_OUTPUT_BYTES,
         signal,
+        onOutput(_stream, text) {
+          pendingOutput += text;
+          outputTimer ??= setTimeout(publishOutput, 50);
+        },
       });
+      if (outputTimer) clearTimeout(outputTimer);
+      publishOutput();
       onEvent({ type: "completed", command, ...result });
       return formatCommandResult(result);
     },

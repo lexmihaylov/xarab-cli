@@ -145,6 +145,9 @@ export function createMessageTimeline({
       part.summary = event.reason;
     } else if (event.type === "started") {
       part.title = `Executing ${safeToolDetail(event.command)}`;
+      if (toolName === "run_command") part.summary = "";
+    } else if (event.type === "output" && toolName === "run_command") {
+      part.summary = `${part.summary ?? ""}${event.text}`.slice(-64 * 1024);
     } else if (event.type === "completed") {
       part.status = event.code === 0 && !event.error && !event.timedOut ? "complete" : "error";
       if (event.timedOut) part.title = `Execution timed out: ${safeToolDetail(event.command)}`;

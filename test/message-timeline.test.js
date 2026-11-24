@@ -48,6 +48,28 @@ test("concurrent webfetch events settle the matching call, including errors", ()
   assert.equal(parts[2].summary, "Fetched 7 bytes");
 });
 
+test("command output updates only the matching running call", () => {
+  const parts = ["first", "second"].map((callId) => ({
+    type: "tool",
+    toolName: "run_command",
+    callId,
+    status: "running",
+    summary: "Executing command",
+  }));
+  const timeline = createMessageTimeline({
+    getMessages: () => [],
+    getCurrentAgentMessage: () => ({ parts }),
+    getActiveSession: () => ({}),
+    sessionChanged: () => {},
+    notify: () => {},
+  });
+  timeline.onToolEvent("run_command", { type: "started", callId: "second", command: "test" });
+  timeline.onToolEvent("run_command", { type: "output", callId: "second", text: "hello\n" });
+  assert.equal(parts[0].summary, "Executing command");
+  assert.equal(parts[1].summary, "hello\n");
+  assert.equal(parts[1].status, "running");
+});
+
 test("unmatched success events are ignored while standalone errors remain visible", () => {
   const messages = [];
   const timeline = createMessageTimeline({
