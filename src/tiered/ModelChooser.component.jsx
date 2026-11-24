@@ -1,6 +1,6 @@
 import { workerVariants, effortLabel, workerKey } from "../utils/worker-effort.js";
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { useKeyboard, useTerminalDimensions } from "@opentui/react";
+import { useKeyboard, useRenderer, useTerminalDimensions } from "@opentui/react";
 import { getTheme } from "../utils/theme-engine.js";
 
 const colors = getTheme().colors;
@@ -39,7 +39,9 @@ export function ModelChooser({
   const [workerQuery, setWorkerQuery] = useState("");
   const classifierScroll = useRef(null);
   const workerScroll = useRef(null);
-  const { width: terminalWidth } = useTerminalDimensions();
+  const tierScroll = useRef(null);
+  const renderer = useRenderer();
+  const { width: terminalWidth, height: terminalHeight } = useTerminalDimensions();
   const classifierOptions = useMemo(() => {
     const options = [
       { name: "Routing disabled", description: "Do not classify requests", value: null },
@@ -146,13 +148,43 @@ export function ModelChooser({
   // semi-large terminal just because the layout is below the full-screen width.
   const narrow = usableWidth < 92;
   const medium = usableWidth < 120;
-  const visible = narrow ? [activeControl] : medium ? [0, 1] : [0, 1, 2];
+  const visible = narrow
+    ? [activeControl]
+    : medium
+      ? activeControl === 2
+        ? [1, 2]
+        : [0, 1]
+      : [0, 1, 2];
 
   useEffect(() => {
-    if (activeControl === 0)
-      classifierScroll.current?.scrollChildIntoView(`router-${classifierIndex}`);
-    if (activeControl === 2) workerScroll.current?.scrollChildIntoView(`worker-${workerIndex}`);
-  }, [activeControl, classifierIndex, workerIndex]);
+    // The React commit precedes OpenTUI layout. Wait for a rendered frame so
+    // newly mounted panes and their rows have usable coordinates.
+    let frame = renderer.requestAnimationFrame(() => {
+      frame = renderer.requestAnimationFrame(() => {
+        const scroll = [classifierScroll, tierScroll, workerScroll][activeControl].current;
+        const index = [classifierIndex, tier - 1, workerIndex][activeControl];
+        if (!scroll || !scroll.viewport.height) return;
+        // Each option is a single row. OpenTUI's scrollChildIntoView does not
+        // move when the row and viewport have the same height.
+        if (index < scroll.scrollTop) scroll.scrollTop = index;
+        else if (index >= scroll.scrollTop + scroll.viewport.height)
+          scroll.scrollTop = index - scroll.viewport.height + 1;
+      });
+    });
+    return () => renderer.cancelAnimationFrame(frame);
+  }, [
+    renderer,
+    activeControl,
+    classifierIndex,
+    workerIndex,
+    tier,
+    terminalWidth,
+    terminalHeight,
+    routerQuery,
+    workerQuery,
+    classifierOptions,
+    workerOptions,
+  ]);
 
   useKeyboard((key) => {
     if (key.name === "escape") {
@@ -335,6 +367,7 @@ export function ModelChooser({
             1,
             "02 TIERS",
             <scrollbox
+              ref={tierScroll}
               flexGrow={1}
               minHeight={0}
               scrollY
@@ -347,6 +380,7 @@ export function ModelChooser({
                 return (
                   <box
                     key={number}
+                    id={`tier-${number}`}
                     flexDirection="column"
                     flexShrink={0}
                     backgroundColor={selected ? colors.selected : undefined}
@@ -403,6 +437,7 @@ export function ModelChooser({
                     return (
                       <box
                         key={workerKey(option.value)}
+                        id={`worker-${index}`}
                         flexDirection="column"
                         flexShrink={0}
                         backgroundColor={selected ? colors.selected : undefined}

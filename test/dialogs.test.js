@@ -46,6 +46,73 @@ test("model chooser applies the selected router and worker model", async () => {
   }
 });
 
+test("model chooser keeps the active pane and scrolled selections visible", async () => {
+  const models = Array.from({ length: 24 }, (_, index) => ({
+    provider: "openrouter",
+    id: `model-${String(index).padStart(2, "0")}`,
+    name: `Model ${String(index).padStart(2, "0")}`,
+  }));
+  const view = await render(
+    React.createElement(ModelChooser, {
+      models,
+      classifier: { provider: "openrouter", model: "model-20" },
+      tierWorkers: { 1: { provider: "openrouter", model: "model-20", effort: "default" } },
+      onClose() {},
+      onSetClassifier() {},
+      onSetTierWorker() {},
+      onRefreshWorkerModels() {},
+    }),
+    { width: 110, height: 18 },
+  );
+  const key = async (name) => {
+    await act(async () =>
+      name === "tab" ? view.mockInput.pressTab() : view.mockInput.pressArrow(name),
+    );
+    await view.flush();
+    await view.flush();
+  };
+  try {
+    await view.flush();
+    await view.flush();
+    assert.match(view.captureCharFrame(), /› OpenRouter · Model 20/);
+    await key("down");
+    assert.match(view.captureCharFrame(), /› OpenRouter · Model 21/);
+    await key("tab");
+    await key("tab");
+    assert.match(view.captureCharFrame(), /03 TIER 1 WORKER/);
+    assert.match(view.captureCharFrame(), /› OpenRouter · Model 20/);
+    await key("down");
+    assert.match(view.captureCharFrame(), /› OpenRouter · Model 21/);
+  } finally {
+    await view.dispose();
+  }
+});
+
+test("model chooser scrolls tier selection in a short terminal", async () => {
+  const view = await render(
+    React.createElement(ModelChooser, {
+      onClose() {},
+      onSetClassifier() {},
+      onSetTierWorker() {},
+      onRefreshWorkerModels() {},
+    }),
+    { width: 80, height: 17 },
+  );
+  try {
+    await act(async () => view.mockInput.pressTab());
+    await view.flush();
+    await act(async () => view.mockInput.pressArrow("down"));
+    await view.flush();
+    await act(async () => view.mockInput.pressArrow("down"));
+    await view.flush();
+    await view.flush();
+    await view.flush();
+    assert.match(view.captureCharFrame(), /› Tier 3/);
+  } finally {
+    await view.dispose();
+  }
+});
+
 test("provider dialog starts sign-in and offers redirect input", async () => {
   const actions = [];
   const props = {
