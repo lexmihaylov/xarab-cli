@@ -1,6 +1,14 @@
 // Only offer efforts advertised by discovery; never infer support from a model ID.
 export function workerVariants(model) {
-  const base = { provider: model.provider, model: model.id };
+  const base = {
+    provider: model.provider,
+    model: model.id,
+    ...(model.provider !== "local" &&
+    Number.isSafeInteger(model.contextWindow) &&
+    model.contextWindow > 0
+      ? { contextWindow: model.contextWindow }
+      : {}),
+  };
   if (model.provider === "local") return [base];
   const advertised =
     model.provider === "openai"

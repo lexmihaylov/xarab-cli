@@ -450,6 +450,49 @@ test("single mode uses the selected local model for chat and compaction, without
   assert.match(controller.getState().messages.at(-1).message, /Result from the selected model/);
 });
 
+test("local context occupancy triggers compaction only after a successful turn at the threshold", async (t) => {
+  const root = await mkdtemp("/tmp/opencode/xarab-local-compact-");
+  let occupancy = 84;
+  let fail = false;
+  const requests = [];
+  const controller = createAssistantController({
+    mode: "single",
+    appPolicy: singleAppPolicy,
+    root,
+    workspace: root,
+    configPath: path.join(root, "config.json"),
+    automaticTitles: false,
+    automaticSuggestions: false,
+    localWorkerAdapterFactory: () => ({
+      async run(request) {
+        requests.push(request);
+        if (Object.keys(request.tools).length) {
+          request.onEvent({ type: "local_context_usage", contextSize: 100, occupiedTokens: occupancy });
+          if (fail) throw new Error("generation failed");
+        }
+        request.onText("Response");
+      },
+    }),
+  });
+  t.after(async () => {
+    await controller.shutdown();
+    await rm(root, { recursive: true, force: true });
+  });
+  await controller.initialize();
+  await controller.setSingleModel({ provider: "local", model: path.join(root, "model.gguf") });
+  await controller.submit("Below threshold");
+  assert.equal(requests.length, 1);
+  occupancy = 85;
+  fail = true;
+  await controller.submit("Failed turn");
+  assert.equal(requests.length, 2);
+  fail = false;
+  await controller.submit("At threshold");
+  assert.equal(requests.length, 4);
+  assert.deepEqual(requests[3].tools, {});
+  assert.ok(controller.getState().messages.some((message) => message.autoCompactSummary));
+});
+
 test("tier mode rejects a legacy local classifier before creating its runtime", async (t) => {
   const root = await mkdtemp("/tmp/opencode/xarab-tier-controller-");
   const configPath = path.join(root, "config.json");

@@ -129,7 +129,6 @@ export function createOpenAIResponsesWorkerAdapter({
                   streamedChunks,
                   streamedText,
                 } = await requestOverWebSocket(socket, body, {
-                  onText,
                   onTextDelta,
                   onEvent: emitEvent,
                   signal: requestSignal,
@@ -423,7 +422,7 @@ async function openResponsesWebSocket({ webSocketFactory, credentials, sessionID
   return socket;
 }
 
-function requestOverWebSocket(socket, body, { onText, onTextDelta, onEvent, signal }) {
+function requestOverWebSocket(socket, body, { onTextDelta, onEvent, signal }) {
   return new Promise((resolve, reject) => {
     let completed;
     let streamedText = "";

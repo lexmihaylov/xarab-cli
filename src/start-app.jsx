@@ -54,7 +54,6 @@ export async function startApp({ appPolicy, App, releaseInstanceLock }) {
         onStopGeneration={controller.stopGeneration}
         onDraftChange={controller.updateDraft}
         onCloseModelModal={controller.closeModelModal}
-        onOpenProviders={controller.openProviderModal}
         onCloseProviders={controller.closeProviderModal}
         onProviderAction={controller.providerAction}
         onDownloadSelectedModel={controller.downloadSelectedModel}
@@ -62,6 +61,7 @@ export async function startApp({ appPolicy, App, releaseInstanceLock }) {
         onSearchHuggingFace={controller.searchHuggingFace}
         onSetSingleModel={controller.setSingleModel}
         onSetModelContextSize={controller.setModelContextSize}
+        onSetModelInputBudget={controller.setModelInputBudget}
         onSetRouterClassifier={controller.setRouterClassifier}
         onSetRouterTierWorker={controller.setRouterTierWorker}
         onDeleteModel={controller.deleteModel}

@@ -17,6 +17,7 @@ export function SingleModelChooser({
   onClose,
   onSetSingleModel,
   onSetModelContextSize,
+  onSetModelInputBudget,
   onDeleteModel,
   onRefreshWorkerModels,
 }) {
@@ -24,6 +25,7 @@ export function SingleModelChooser({
   const [index, setIndex] = useState(0);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [contextTarget, setContextTarget] = useState(null);
+  const [budgetMode, setBudgetMode] = useState(false);
   const [contextInput, setContextInput] = useState("");
   const [contextError, setContextError] = useState("");
   const [savingContext, setSavingContext] = useState(false);
@@ -58,7 +60,9 @@ export function SingleModelChooser({
         }
         setContextError("");
         setSavingContext(true);
-        Promise.resolve(onSetModelContextSize(contextTarget.model, value))
+        Promise.resolve(
+          (budgetMode ? onSetModelInputBudget : onSetModelContextSize)(contextTarget.model, value),
+        )
           .then((success) => {
             if (success) setContextTarget(null);
           })
@@ -82,8 +86,21 @@ export function SingleModelChooser({
     ) {
       key.preventDefault();
       const target = options[selectedIndex].value;
+      setBudgetMode(false);
       setContextTarget(target);
       setContextInput(modelSettings[target.model]?.contextSize?.toString() ?? "");
+      setContextError("");
+    } else if (
+      key.ctrl &&
+      key.name === "b" &&
+      options[selectedIndex]?.value.provider === "local" &&
+      onSetModelInputBudget
+    ) {
+      key.preventDefault();
+      const target = options[selectedIndex].value;
+      setBudgetMode(true);
+      setContextTarget(target);
+      setContextInput(modelSettings[target.model]?.inputBudget?.toString() ?? "");
       setContextError("");
     } else if (
       key.ctrl &&
@@ -136,17 +153,21 @@ export function SingleModelChooser({
               paddingY={1}
             >
               <text fg={colors.accent} bold>
-                LOCAL CONTEXT SIZE
+                {budgetMode ? "LOCAL INPUT BUDGET" : "LOCAL CONTEXT SIZE"}
               </text>
               <text fg={colors.text} wrapMode="word">
                 {contextTarget.model.split(/[\\/]/).at(-1)}
               </text>
-              <text fg={colors.muted}>Positive integer · empty resets to default 16384</text>
+              <text fg={colors.muted}>
+                {budgetMode
+                  ? "Estimated tokens · empty resets to 85% of context"
+                  : "Positive integer · empty resets to default 16384"}
+              </text>
               <input
                 value={contextInput}
                 focused={!savingContext}
                 onInput={setContextInput}
-                placeholder="Default: 16384"
+                placeholder={budgetMode ? "Default: 85% of context" : "Default: 16384"}
                 width="100%"
               />
               {(contextError || error) && (
@@ -260,14 +281,14 @@ export function SingleModelChooser({
       </box>
       {options[selectedIndex]?.value.provider === "local" && (
         <text fg={colors.muted} truncate>
-          {`Context size: ${modelSettings[options[selectedIndex].value.model]?.contextSize ?? "16384 (default)"}`}
+          {`Context size: ${modelSettings[options[selectedIndex].value.model]?.contextSize ?? "16384 (default)"} · Input budget: ${modelSettings[options[selectedIndex].value.model]?.inputBudget ?? "85% (default)"}`}
         </text>
       )}
       <text fg={error || providerModelError ? colors.error : colors.muted} truncate>
         {error || providerModelError || (loadingProviderModels ? "Loading providers…" : " ")}
       </text>
       <text fg={colors.hint} truncate>
-        {`Type to filter · ↑↓ choose · Enter apply · ${options[selectedIndex]?.value.provider === "local" && onSetModelContextSize ? "Ctrl+G context · " : ""}${options[selectedIndex]?.value.provider === "local" && onDeleteModel ? "Ctrl+D delete · " : ""}Ctrl+R refresh · Esc close`}
+        {`Type to filter · ↑↓ choose · Enter apply · ${options[selectedIndex]?.value.provider === "local" && onSetModelContextSize ? "Ctrl+G context · Ctrl+B budget · " : ""}${options[selectedIndex]?.value.provider === "local" && onDeleteModel ? "Ctrl+D delete · " : ""}Ctrl+R refresh · Esc close`}
       </text>
     </Modal>
   );

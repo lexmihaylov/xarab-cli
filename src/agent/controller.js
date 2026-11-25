@@ -122,6 +122,7 @@ export function createAssistantController({
     () =>
       localWorkerAdapterFactory({
         getContextSize: (modelPath) => configStore.getModel?.(modelPath)?.contextSize,
+        getInputBudget: (modelPath) => configStore.getModel?.(modelPath)?.inputBudget,
       }),
     {
       unavailableReason: () => {
@@ -445,6 +446,8 @@ export function createAssistantController({
     activeWorkDone = workDone;
     let approvedHandoff;
     let succeeded = false;
+    let contextWindow;
+    let contextUsage;
     const responseSession = getActiveSession();
     const responseVersion = suggestionVersion;
     const usageResponses = new Set();
@@ -487,7 +490,37 @@ export function createAssistantController({
         history,
         input: requestText,
         signal: abortController.signal,
+        onAssignment: (assignment) => {
+          if (assignment.provider !== "local")
+            contextWindow =
+              Number.isSafeInteger(assignment.contextWindow) && assignment.contextWindow > 0
+                ? assignment.contextWindow
+                : 80_000;
+        },
         onEvent(event) {
+          if (
+            event.type === "local_context_usage" &&
+            Number.isSafeInteger(event.contextSize) &&
+            event.contextSize > 0 &&
+            Number.isSafeInteger(event.occupiedTokens) &&
+            event.occupiedTokens >= 0
+          ) {
+            contextWindow = event.contextSize;
+            contextUsage = event.occupiedTokens;
+          }
+          const usage =
+            event.type === "context_usage"
+              ? { input: event.inputTokens, output: event.outputTokens }
+              : ["response.completed", "response.done"].includes(event.type)
+                ? {
+                    input: event.response?.usage?.input_tokens,
+                    output: event.response?.usage?.output_tokens,
+                  }
+                : undefined;
+          if (Number.isSafeInteger(usage?.input) && usage.input >= 0)
+            contextUsage =
+              usage.input +
+              (Number.isSafeInteger(usage.output) && usage.output >= 0 ? usage.output : 0);
           if (event.type === "openrouter_history") {
             assistantMessage.openrouterMessages = event.messages;
             assistantMessage.openrouterTextLength = assistantMessage.parts
@@ -626,7 +659,13 @@ export function createAssistantController({
         setSessionError(`Session could not be saved: ${error.message}`);
         notify();
       });
-      if (!approvedHandoff && !isShuttingDown) {
+      if (
+        succeeded &&
+        !approvedHandoff &&
+        !isShuttingDown &&
+        contextWindow != null &&
+        contextUsage >= Math.floor(contextWindow * 0.85)
+      ) {
         await autoCompactor.compact();
       }
       finishWork();

@@ -147,3 +147,41 @@ test("model discovery preserves actual provider effort metadata", async () => {
   const [b] = await router.listModels();
   assert.deepEqual(b.reasoning, reasoning);
 });
+
+test("remote context metadata is discovered and persisted with tier assignments", async () => {
+  const { createOpenAIModelManager } = await import("../src/agent/openai-model-manager.js");
+  const { createOpenRouterModelManager } = await import("../src/agent/openrouter-model-manager.js");
+  const ai = createOpenAIModelManager({
+    getCredentials: async () => ({}),
+    fetchImpl: async () => Response.json({ models: [{ slug: "a", context_window: 128000 }] }),
+  });
+  const router = createOpenRouterModelManager({
+    getApiKey: () => "key",
+    fetchImpl: async () =>
+      Response.json({
+        data: [{ id: "b", context_length: 64000, architecture: { output_modalities: ["text"] } }],
+      }),
+  });
+  assert.equal((await ai.listModels())[0].contextWindow, 128000);
+  assert.equal((await router.listModels())[0].contextWindow, 64000);
+  const dir = await mkdtemp(path.join(os.tmpdir(), "xarab-context-"));
+  try {
+    const args = [path.join(dir, "config.json"), path.join(dir, "routing.json")];
+    const store = createTieredConfigStore(...args);
+    await store.setTierWorker(1, { provider: "openrouter", model: "b", contextWindow: 64000 });
+    const loaded = createTieredConfigStore(...args);
+    await loaded.load();
+    assert.equal(loaded.getTierWorker(1).contextWindow, 64000);
+    const { createSingleConfigStore } = await import("../src/single/config-store.js");
+    const singlePath = path.join(dir, "single.json");
+    for (const discovered of [...(await ai.listModels()), ...(await router.listModels())]) {
+      const configured = createSingleConfigStore(singlePath);
+      await configured.setSingleModel(workerVariants(discovered)[0]);
+      const reloaded = createSingleConfigStore(singlePath);
+      await reloaded.load();
+      assert.equal(reloaded.getSingleModel().contextWindow, discovered.contextWindow);
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});

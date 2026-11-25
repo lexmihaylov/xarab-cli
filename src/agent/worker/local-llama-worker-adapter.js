@@ -1,10 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { getLlama, LlamaChatSession } from "node-llama-cpp";
+import { ContextBudgetError, estimateRequestTokens } from "./local-request-budget.js";
 
 export function createLocalLlamaWorkerAdapter({
   modelRuntime = { getLlama, createSession: (options) => new LlamaChatSession(options) },
   contextSize = 16384,
   getContextSize = () => undefined,
+  getInputBudget = () => undefined,
   maxTokens = 4096,
 } = {}) {
   let model;
@@ -108,8 +110,44 @@ export function createLocalLlamaWorkerAdapter({
     size,
   ) {
     signal.throwIfAborted();
+    const configuredBudget = getInputBudget(modelPath);
+    const budget =
+      Number.isSafeInteger(configuredBudget) && configuredBudget > 0
+        ? Math.min(configuredBudget, size - 1)
+        : Math.floor(size * 0.85);
+    const requestParts = [
+      instructions,
+      input,
+      Object.fromEntries(
+        Object.entries(tools).map(([name, tool]) => [
+          name,
+          { description: tool.description, params: tool.params },
+        ]),
+      ),
+    ];
+    const toolOutputs = [];
     const context = await loadContext(modelPath, lane, signal, size);
     signal.throwIfAborted();
+    const loadedModel = model.value;
+    const overflow = new AbortController();
+    signal = AbortSignal.any([signal, overflow.signal]);
+    const tokenEstimate = (value) =>
+      typeof loadedModel.tokenize === "function"
+        ? loadedModel.tokenize(JSON.stringify(value)).length
+        : estimateRequestTokens(value);
+    let generatedText = "";
+    const checkBudget = (continuation = false, sequenceEstimate = 0) => {
+      const estimated = Math.max(
+        sequenceEstimate,
+        tokenEstimate([...requestParts, ...toolOutputs]) +
+          (generatedText ? tokenEstimate(generatedText) : 0),
+      );
+      if (estimated > budget)
+        throw new ContextBudgetError("local", modelPath, estimated, budget, {
+          continuation,
+        });
+    };
+    checkBudget();
 
     const functions = Object.fromEntries(
       Object.entries(tools).map(([name, tool]) => [
@@ -119,6 +157,7 @@ export function createLocalLlamaWorkerAdapter({
           params: tool.params ?? { type: "object", properties: {} },
           async handler(params) {
             signal.throwIfAborted();
+            checkBudget(true, contextSequence.nextTokenIndex ?? 0);
             const callId = `local_${randomUUID()}`;
             onEvent({ type: "tool_call", name, callId, arguments: params });
             let result;
@@ -128,6 +167,8 @@ export function createLocalLlamaWorkerAdapter({
               result = { ok: false, output: `Error: ${error?.message ?? String(error)}` };
             }
             if (result.handoff) throw new TierAdjustmentHandoff(result.handoff);
+            toolOutputs.push({ name, params, output: result.output });
+            checkBudget(true, (contextSequence.nextTokenIndex ?? 0) + tokenEstimate(result.output));
             return result.output;
           },
         },
@@ -141,25 +182,69 @@ export function createLocalLlamaWorkerAdapter({
       session = modelRuntime.createSession({
         contextSequence,
         systemPrompt: instructions,
-        contextShift: { size: Math.min(6144, Math.floor(size / 2)) },
+        contextShift: {
+          strategy: () => {
+            const error = new Error(
+              `Local model ${modelPath} reached its context limit. Reduce the prompt, history, or tool output, or increase the context size in /model. Completed tools were not rerun.`,
+            );
+            // The library can catch a failing shift strategy and try its default.
+            // Abort generation as well so a shifted response is not accepted.
+            overflow.abort(error);
+            throw error;
+          },
+        },
       });
       const { history, prompt } = formatInput(input);
       if (history.length) session.setChatHistory([...session.getChatHistory(), ...history]);
+      if (session.chatWrapper?.generateContextState && loadedModel.tokenizer) {
+        const chatHistory = session.getChatHistory();
+        const last = chatHistory.at(-1);
+        if (last?.type === "user")
+          chatHistory[chatHistory.length - 1] = { ...last, text: `${last.text}\n\n${prompt}` };
+        else chatHistory.push({ type: "user", text: prompt });
+        chatHistory.push({ type: "model", response: [] });
+        const { contextText } = session.chatWrapper.generateContextState({
+          chatHistory,
+          availableFunctions: functions,
+        });
+        checkBudget(false, contextText.tokenize(loadedModel.tokenizer).length);
+      }
+      const reportContextUsage = () => {
+        const actualSize = contextSequence.contextSize ?? context.contextSize;
+        const contextSize = Number.isSafeInteger(actualSize) && actualSize > 0 ? actualSize : size;
+        const position = contextSequence.nextTokenIndex;
+        const hasPosition = Number.isSafeInteger(position) && position >= 0;
+        onEvent({
+          type: "local_context_usage",
+          contextSize,
+          occupiedTokens: hasPosition
+            ? position
+            : tokenEstimate([...requestParts, ...toolOutputs]) +
+              (generatedText ? tokenEstimate(generatedText) : 0),
+          estimated: !hasPosition,
+        });
+      };
       try {
         const result = await session.prompt(prompt, {
           functions,
           maxParallelFunctionCalls: 1,
-          maxTokens,
+          maxTokens: Math.min(maxTokens, size - budget),
           signal,
           onTextChunk: (text) => {
+            generatedText += text;
             if (!signal.aborted) onText(text);
           },
         });
         signal.throwIfAborted();
+        reportContextUsage();
         if (typeof result === "string") return {};
         return result ?? {};
       } catch (error) {
-        if (error instanceof TierAdjustmentHandoff) return { handoff: error.handoff };
+        overflow.signal.throwIfAborted();
+        if (error instanceof TierAdjustmentHandoff) {
+          reportContextUsage();
+          return { handoff: error.handoff };
+        }
         throw error;
       }
     } finally {

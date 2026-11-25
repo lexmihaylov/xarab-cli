@@ -666,3 +666,38 @@ test("remoteOnly rejects configured local workers for turns and utility calls", 
     await worker.dispose();
   }
 });
+
+test("budget errors propagate without compaction or retry", async () => {
+  const { ContextBudgetError } = await import("../../../src/agent/worker/local-request-budget.js");
+  for (const continuation of [false, true]) {
+    const calls = [];
+    const error = new ContextBudgetError("local", "test", 101, 100, { continuation });
+    const worker = createWorker({
+      configStore: createConfig({ provider: "local", model: "test" }),
+      openAIAdapterFactory: () => ({ run: async () => {} }),
+      localAdapterFactory: () => ({
+        async run(request) {
+          calls.push(request);
+          throw error;
+        },
+      }),
+    });
+    try {
+      await assert.rejects(
+        worker.run({
+          tier: 1,
+          history: [{ type: "user", message: "older details" }],
+          input: "current request",
+        }),
+        (actual) => actual === error,
+      );
+      assert.equal(calls.length, 1);
+      assert.deepEqual(calls[0].input, [
+        { role: "user", content: "older details" },
+        { role: "user", content: "current request" },
+      ]);
+    } finally {
+      await worker.dispose();
+    }
+  }
+});

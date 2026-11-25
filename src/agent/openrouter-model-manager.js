@@ -22,6 +22,9 @@ export function createOpenRouterModelManager({ getApiKey, fetchImpl = fetch } = 
           provider: "openrouter",
           id: model.id,
           name: model.name || model.id,
+          ...(Number.isSafeInteger(model.context_length) && model.context_length > 0
+            ? { contextWindow: model.context_length }
+            : {}),
           ...(model.reasoning ? { reasoning: model.reasoning } : {}),
         }));
     },

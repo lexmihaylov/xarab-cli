@@ -4,8 +4,6 @@ import { generateCompactionSummary } from "./compaction-summary.js";
 
 export { AUTO_COMPACT_KEEP_TURNS } from "./session-context.js";
 
-export const AUTO_COMPACT_INTERVAL = 50;
-
 export function createAutoCompactor({
   getMessages,
   setMessages,
@@ -27,9 +25,13 @@ export function createAutoCompactor({
     for (let index = lastSummary + 1; index < messages.length; index++) {
       if (messages[index].type === "user") userIndices.push(index);
     }
-    if (userIndices.length < AUTO_COMPACT_INTERVAL || isShuttingDown()) return false;
+    if (isShuttingDown()) return false;
+    if (!userIndices.length) return false;
 
-    const boundary = userIndices.at(-AUTO_COMPACT_KEEP_TURNS);
+    const boundary =
+      userIndices.length <= AUTO_COMPACT_KEEP_TURNS
+        ? messages.length
+        : userIndices.at(-AUTO_COMPACT_KEEP_TURNS);
     const older = messages.slice(0, boundary);
     const recent = messages.slice(boundary);
     const transcript = older
@@ -49,7 +51,7 @@ export function createAutoCompactor({
     let route;
     try {
       route = await classifyForRouting(
-        "Summarize older conversation for automatic turn-based compaction.",
+        "Summarize older conversation for automatic context compaction.",
       );
     } catch (error) {
       addMessage({

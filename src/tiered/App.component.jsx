@@ -21,7 +21,6 @@ export function App(props) {
       onSetClassifier={props.onSetRouterClassifier}
       onSetTierWorker={props.onSetRouterTierWorker}
       onRefreshWorkerModels={props.onRefreshRouterWorkerModels}
-      onOpenProviders={props.onOpenProviders}
     />
   );
   return (

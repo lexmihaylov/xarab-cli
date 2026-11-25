@@ -99,7 +99,7 @@ export function createOpenRouterWorkerAdapter({
     let usedTool = false;
     while (true) {
       if (signal?.aborted) throw signal.reason ?? new Error("Request cancelled.");
-      const { text, calls, reasoningDetails } = await withProviderInactivity({
+      const { text, calls, reasoningDetails, usage } = await withProviderInactivity({
         signal,
         timeoutMs: inactivityTimeoutMs,
         maxRetries: inactivityRetries,
@@ -115,6 +115,7 @@ export function createOpenRouterWorkerAdapter({
               ...(effort && effort !== "default" ? { reasoning: { effort } } : {}),
               messages,
               stream: true,
+              stream_options: { include_usage: true },
               ...(definitions.length ? { tools: definitions } : {}),
             }),
             signal: requestSignal,
@@ -152,6 +153,7 @@ export function createOpenRouterWorkerAdapter({
           const reasoningDetails = [];
           const reasoningIndices = new Map();
           let finished = false;
+          let usage;
           const consume = (block) => {
             const data = block
               .split(/\r?\n/)
@@ -172,6 +174,7 @@ export function createOpenRouterWorkerAdapter({
             if (requestSignal.aborted) return;
             if (event.error)
               throw new Error(`OpenRouter stream failed (${event.error.code ?? "unknown_error"}).`);
+            if (event.usage) usage = event.usage;
             const delta = event.choices?.[0]?.delta;
             if (delta && Object.keys(delta).length) {
               activity({ output: Boolean(delta.content || delta.tool_calls?.length) });
@@ -239,9 +242,18 @@ export function createOpenRouterWorkerAdapter({
             reader.releaseLock();
           }
           if (!finished) throw new Error("OpenRouter stream ended unexpectedly.");
-          return { text, calls, reasoningDetails };
+          return { text, calls, reasoningDetails, usage };
         },
       });
+      if (Number.isSafeInteger(usage?.prompt_tokens) && usage.prompt_tokens >= 0)
+        onEvent({
+          type: "context_usage",
+          inputTokens: usage.prompt_tokens,
+          outputTokens:
+            Number.isSafeInteger(usage.completion_tokens) && usage.completion_tokens >= 0
+              ? usage.completion_tokens
+              : 0,
+        });
       const reasoning = reasoningDetails.length ? { reasoning_details: reasoningDetails } : {};
       if (!calls.size) {
         if (

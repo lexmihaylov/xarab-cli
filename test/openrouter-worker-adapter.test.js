@@ -288,3 +288,48 @@ test("forwards effort and preserves opaque reasoning blocks through tools and re
   assert.equal(requests[2].reasoning, undefined);
   assert.deepEqual(requests[2].messages[0].reasoning_details, assembled);
 });
+
+test("sends large tool output without treating bytes as tokens and reports usage", async () => {
+  let requests = 0;
+  const events = [];
+  const adapter = createOpenRouterWorkerAdapter({
+    getApiKey: () => "key",
+    fetchImpl: async () => {
+      requests++;
+      return stream(
+        requests === 1
+          ? [
+              {
+                choices: [
+                  {
+                    delta: {
+                      tool_calls: [
+                        { index: 0, id: "c", function: { name: "read", arguments: "{}" } },
+                      ],
+                    },
+                  },
+                ],
+              },
+            ]
+          : [
+              { choices: [{ delta: { content: "done" } }] },
+              { usage: { prompt_tokens: 100, completion_tokens: 5 }, choices: [] },
+            ],
+      );
+    },
+  });
+  await adapter.run({
+    model: "m",
+    contextWindow: 1000,
+    input: "hi",
+    tools: { read: { handler: async () => "x".repeat(4000) } },
+    onEvent: (event) => events.push(event),
+  });
+  assert.equal(requests, 2);
+  assert.ok(
+    events.some(
+      (event) =>
+        event.type === "context_usage" && event.inputTokens === 100 && event.outputTokens === 5,
+    ),
+  );
+});

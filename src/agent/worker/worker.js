@@ -106,6 +106,7 @@ export function createWorker({
       input,
       model: assignment.model,
       effort: assignment.effort,
+      ...(assignment.provider !== "local" ? { contextWindow: assignment.contextWindow } : {}),
       ...(instructions ? { instructions } : {}),
       ...(tools ? { tools } : {}),
     });

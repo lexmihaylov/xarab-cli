@@ -1210,3 +1210,44 @@ for (const [effort, expected] of [
     assert.equal(body.reasoning.summary, "auto");
   });
 }
+
+for (const transport of ["HTTP", "WebSocket"]) {
+  test(`${transport} sends a large tool continuation without treating bytes as tokens`, async () => {
+    let requests = 0;
+    const events = [
+      {
+        type: "response.completed",
+        response: {
+          id: "r1",
+          output: [{ type: "function_call", name: "read", call_id: "c1", arguments: "{}" }],
+        },
+      },
+    ];
+    const finalEvents = [
+      {
+        type: "response.completed",
+        response: { output: [{ type: "message", content: [{ type: "output_text", text: "done" }] }] },
+      },
+    ];
+    const adapter = createOpenAIResponsesWorkerAdapter({
+      getCredentials: async () => ({ access_token: "x", account_id: "x" }),
+      fetchImpl: async () => {
+        requests++;
+        return streamedResponse(requests === 1 ? events : finalEvents);
+      },
+      webSocketFactory: () =>
+        new TestWebSocket(() => {
+          requests++;
+          return requests === 1 ? events : finalEvents;
+        }),
+    });
+    await adapter.run({
+      model: "model",
+      contextWindow: 1000,
+      input: "hi",
+      ...(transport === "WebSocket" ? { sessionID: "s" } : {}),
+      tools: { read: { handler: async () => "x".repeat(4000) } },
+    });
+    assert.equal(requests, 2);
+  });
+}

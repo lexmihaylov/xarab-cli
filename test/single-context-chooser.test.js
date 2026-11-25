@@ -40,6 +40,7 @@ test("context action saves, resets, and reports busy or persistence errors in ch
 
 test("local context editor validates, cancels, saves and excludes remote models", async () => {
   const calls = [];
+  const budgetCalls = [];
   const view = await testRender(
     React.createElement(SingleModelChooser, {
       models: [
@@ -51,6 +52,10 @@ test("local context editor validates, cancels, saves and excludes remote models"
       onSetSingleModel() {},
       onSetModelContextSize: async (...args) => {
         calls.push(args);
+        return true;
+      },
+      onSetModelInputBudget: async (...args) => {
+        budgetCalls.push(args);
         return true;
       },
     }),
@@ -86,7 +91,17 @@ test("local context editor validates, cancels, saves and excludes remote models"
       ["/a", 4096],
       ["/a", undefined],
     ]);
+    await act(async () => view.mockInput.pressKey("b", { ctrl: true }));
+    await view.flush();
+    assert.match(view.captureCharFrame(), /LOCAL INPUT BUDGET/);
+    await act(async () => view.mockInput.typeText("3000"));
+    await act(async () => view.mockInput.pressEnter());
+    await view.flush();
+    assert.deepEqual(budgetCalls, [["/a", 3000]]);
     await act(async () => view.mockInput.pressArrow("down"));
+    await act(async () => view.mockInput.pressKey("b", { ctrl: true }));
+    await view.flush();
+    assert.doesNotMatch(view.captureCharFrame(), /LOCAL INPUT BUDGET/);
     await act(async () => view.mockInput.pressKey("g", { ctrl: true }));
     await view.flush();
     assert.doesNotMatch(view.captureCharFrame(), /LOCAL CONTEXT SIZE/);

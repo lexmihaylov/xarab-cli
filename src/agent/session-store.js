@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, open, readFile, readdir, rename, stat, unlink } from "node:fs/promises";
+import { open, readFile, readdir, rename, stat, unlink } from "node:fs/promises";
 import path from "node:path";
 import { acquireSessionLock } from "./session-lock.js";
 

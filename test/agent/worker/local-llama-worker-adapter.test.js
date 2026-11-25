@@ -74,10 +74,25 @@ test("nested validation uses an isolated cached context on the same weights", as
   await replacement;
   await adapter.dispose();
   assert.deepEqual(events, [
-    "load:a.gguf", "prompt:1:parent", "prompt:2:first", "session:2", "sequence:2",
-    "prompt:2:second", "session:2", "sequence:2", "session:1", "sequence:1",
-    "context:2", "context:1", "model:a.gguf", "load:b.gguf", "prompt:3:replacement",
-    "session:3", "sequence:3", "context:3", "model:b.gguf",
+    "load:a.gguf",
+    "prompt:1:parent",
+    "prompt:2:first",
+    "session:2",
+    "sequence:2",
+    "prompt:2:second",
+    "session:2",
+    "sequence:2",
+    "session:1",
+    "sequence:1",
+    "context:2",
+    "context:1",
+    "model:a.gguf",
+    "load:b.gguf",
+    "prompt:3:replacement",
+    "session:3",
+    "sequence:3",
+    "context:3",
+    "model:b.gguf",
   ]);
 });
 
@@ -85,27 +100,35 @@ test("runtime keeps validation reserved through cancelled context creation and d
   const creating = Promise.withResolvers();
   const created = Promise.withResolvers();
   const events = [];
-  const runtime = createLocalWorkerRuntime(() => createLocalLlamaWorkerAdapter({
-    modelRuntime: {
-      async getLlama() {
-        return {
-          async loadModel() {
-            return {
-              async createContext({ createSignal }) {
-                creating.resolve(createSignal);
-                await created.promise;
-                return {
-                  getSequence() { assert.fail("Cancelled validation must not start a session"); },
-                  dispose() { events.push("context"); },
-                };
-              },
-              dispose() { events.push("model"); },
-            };
-          },
-        };
+  const runtime = createLocalWorkerRuntime(() =>
+    createLocalLlamaWorkerAdapter({
+      modelRuntime: {
+        async getLlama() {
+          return {
+            async loadModel() {
+              return {
+                async createContext({ createSignal }) {
+                  creating.resolve(createSignal);
+                  await created.promise;
+                  return {
+                    getSequence() {
+                      assert.fail("Cancelled validation must not start a session");
+                    },
+                    dispose() {
+                      events.push("context");
+                    },
+                  };
+                },
+                dispose() {
+                  events.push("model");
+                },
+              };
+            },
+          };
+        },
       },
-    },
-  }));
+    }),
+  );
   const validator = runtime.createAdapter({ validate: true });
   const controller = new AbortController();
   const pending = validator.run({ model: "a.gguf", signal: controller.signal });
@@ -156,7 +179,7 @@ test("local worker releases its sequence after successful and failed turns", asy
         };
       },
       createSession({ contextShift }) {
-        assert.equal(contextShift.size, 6144);
+        assert.equal(typeof contextShift.strategy, "function");
         if (fail) throw new Error("session creation failed");
         return { prompt: async () => "done", dispose() {} };
       },
@@ -305,8 +328,80 @@ test("local worker rejects ambiguous and cross-turn tool pairs and executes live
   ]);
   assert.equal(executions.length, 1);
   assert.deepEqual(executions[0].params, { path: "live" });
-  assert.equal(events.length, 1);
+  assert.equal(events.length, 2);
+  assert.equal(events[1].type, "local_context_usage");
   assert.equal(events[0].type, "tool_call");
   assert.equal(events[0].callId, executions[0].context.callId);
+  await adapter.dispose();
+});
+
+test("reports local sequence occupancy and effective context size after tools", async () => {
+  const events = [];
+  const sizes = [];
+  const sequence = { nextTokenIndex: 10, contextSize: 3000, clearHistory() {} };
+  const adapter = createLocalLlamaWorkerAdapter({
+    getContextSize: () => 4096,
+    modelRuntime: {
+      getLlama: async () => ({
+        loadModel: async () => ({
+          createContext: async ({ contextSize }) => {
+            sizes.push(contextSize);
+            return { getSequence: () => sequence };
+          },
+        }),
+      }),
+      createSession: () => ({
+        prompt: async (_, { functions }) => {
+          await functions.read.handler({});
+          sequence.nextTokenIndex = 123;
+          return "done";
+        },
+      }),
+    },
+  });
+  await adapter.run({
+    model: "a",
+    input: "hi",
+    onEvent: (event) => events.push(event),
+    tools: { read: { handler: async () => "result" } },
+  });
+  assert.deepEqual(sizes, [4096]);
+  assert.deepEqual(events.at(-1), {
+    type: "local_context_usage",
+    contextSize: 3000,
+    occupiedTokens: 123,
+    estimated: false,
+  });
+  await adapter.dispose();
+});
+
+test("reports a marked fallback estimate with the default context size", async () => {
+  const events = [];
+  const adapter = createLocalLlamaWorkerAdapter({
+    modelRuntime: {
+      getLlama: async () => ({
+        loadModel: async () => ({
+          createContext: async () => ({ getSequence: () => ({ clearHistory() {} }) }),
+        }),
+      }),
+      createSession: () => ({
+        prompt: async (_, { onTextChunk }) => {
+          onTextChunk("answer");
+          return "answer";
+        },
+      }),
+    },
+  });
+  await adapter.run({ model: "a", input: "hi", onEvent: (event) => events.push(event) });
+  assert.deepEqual(events, [
+    {
+      type: "local_context_usage",
+      contextSize: 16384,
+      occupiedTokens:
+        Buffer.byteLength(JSON.stringify([undefined, "hi", {}])) +
+        Buffer.byteLength(JSON.stringify("answer")),
+      estimated: true,
+    },
+  ]);
   await adapter.dispose();
 });

@@ -29,7 +29,6 @@ export function ModelChooser({
   onSetClassifier,
   onSetTierWorker,
   onRefreshWorkerModels,
-  onOpenProviders,
 }) {
   const [tier, setTier] = useState(1);
   const [activeControl, setActiveControl] = useState(0);

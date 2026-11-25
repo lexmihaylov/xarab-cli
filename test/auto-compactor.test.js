@@ -54,20 +54,23 @@ function turn(index) {
   ];
 }
 
-test("auto-compacts at 50 user turns, retaining ten complete turns", async () => {
-  const state = setup(Array.from({ length: 49 }, (_, i) => turn(i)).flat());
+test("usage-triggered compaction can summarize a single large turn", async () => {
+  const state = setup(turn(0));
+  assert.equal(await state.compactor.compact(), true);
+  assert.equal(state.messages.length, 1);
+  assert.equal(state.messages[0].autoCompactSummary, true);
+  assert.match(state.lastRequest.input[0].content, /User 0/);
   assert.equal(await state.compactor.compact(), false);
-  state.messages.push(...turn(49));
+});
+
+test("turn count alone does not compact; usage-triggered compaction retains ten turns", async () => {
+  const state = setup(Array.from({ length: 100 }, (_, i) => turn(i)).flat());
   assert.equal(await state.compactor.compact(), true);
   assert.equal(state.messages.length, 21);
   assert.equal(state.messages[0].autoCompactSummary, true);
-  assert.equal(state.messages[1].message, "User 40");
-  assert.equal(state.messages.at(-1).parts[0].result.output, "Result 49");
-  assert.equal(await state.compactor.compact(), false);
-  for (let i = 50; i < 100; i++) state.messages.push(...turn(i));
-  assert.equal(await state.compactor.compact(), true);
   assert.equal(state.messages[1].message, "User 90");
-  assert.equal(state.requests, 2);
+  assert.equal(state.messages.at(-1).parts[0].result.output, "Result 99");
+  assert.equal(state.requests, 1);
 });
 test("auto-compaction retries timed-out summaries without keeping partial output", async () => {
   let stale;

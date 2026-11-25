@@ -14,5 +14,11 @@ export function normalizeAssignment(value, { requireModel = true, keepEffort = t
     provider: value.provider,
     ...(model && { model: value.provider === "local" ? path.resolve(model) : model }),
     ...(keepEffort && value.provider !== "local" && effort && { effort }),
+    ...(keepEffort &&
+    value.provider !== "local" &&
+    Number.isSafeInteger(value.contextWindow) &&
+    value.contextWindow > 0
+      ? { contextWindow: value.contextWindow }
+      : {}),
   };
 }

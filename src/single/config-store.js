@@ -10,12 +10,14 @@ function normalizeModelMetadata(value) {
       if (!isRecord(settings)) return [];
       const name = typeof settings.name === "string" ? settings.name.trim() : "";
       const contextSize = settings.contextSize;
+      const inputBudget = settings.inputBudget;
       return [
         [
           modelPath,
           {
             ...(name ? { name } : {}),
             ...(Number.isSafeInteger(contextSize) && contextSize > 0 ? { contextSize } : {}),
+            ...(Number.isSafeInteger(inputBudget) && inputBudget > 0 ? { inputBudget } : {}),
           },
         ],
       ];
@@ -53,6 +55,17 @@ export function singleSettings(storage) {
         if (!isRecord(general.models[modelKey])) general.models[modelKey] = {};
         if (value === undefined) delete general.models[modelKey].contextSize;
         else general.models[modelKey].contextSize = value;
+      });
+    },
+    async setModelInputBudget(modelPath, value) {
+      if (value !== undefined && (!Number.isSafeInteger(value) || value <= 0))
+        throw new Error("Input budget must be a positive safe integer.");
+      const modelKey = path.resolve(modelPath);
+      await updateGeneral((general) => {
+        if (!isRecord(general.models)) general.models = {};
+        if (!isRecord(general.models[modelKey])) general.models[modelKey] = {};
+        if (value === undefined) delete general.models[modelKey].inputBudget;
+        else general.models[modelKey].inputBudget = value;
       });
     },
     async ensureModel(modelPath) {

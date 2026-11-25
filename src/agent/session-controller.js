@@ -9,7 +9,6 @@ export function createSessionController({
   setMessages,
   getPendingShellContext,
   setPendingShellContext,
-  getDraftMessage,
   addMessage,
   notify,
   updateStatus,

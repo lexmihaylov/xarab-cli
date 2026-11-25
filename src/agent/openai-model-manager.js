@@ -39,6 +39,9 @@ export function createOpenAIModelManager({ getCredentials, fetchImpl = fetch }) 
           provider: "openai",
           id,
           name: model.display_name || model.name || id,
+          ...(Number.isSafeInteger(model.context_window) && model.context_window > 0
+            ? { contextWindow: model.context_window }
+            : {}),
           ...(model.supported_reasoning_levels
             ? { supported_reasoning_levels: model.supported_reasoning_levels }
             : {}),

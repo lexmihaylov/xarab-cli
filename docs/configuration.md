@@ -23,7 +23,7 @@ The following are fields of `~/.xarab/config.json`:
 
 | Field | Default | Meaning |
 | --- | --- | --- |
-| `models` | `{}` | Local model metadata keyed by absolute model path. Recognized fields are `name` and `contextSize`. For `xarab-one`, `contextSize` is a positive safe integer in tokens; absent or invalid values use 16384. Change it per local model through `/model`, or reset it to the default. Larger contexts require more memory. Other metadata fields are ignored on load. |
+| `models` | `{}` | Local model metadata keyed by absolute model path. Recognized fields are `name`, `contextSize`, and `inputBudget`. For `xarab-one`, `contextSize` is a positive safe integer in tokens; absent or invalid values use 16384. Change it per local model through `/model`, or reset it to the default. Larger contexts require more memory. Use Ctrl+B in `/model` to set or reset the local input budget (default: 85% of context size; overrides are capped below context size). Other metadata fields are ignored on load. |
 | `apiKeys` | `{}` | Provider keys, including `openrouter` for OpenRouter and `tavily` for web search. `/connect` manages the OpenRouter key. |
 | `openaiModel` | `null` | OpenAI model ID used for worker requests without a tier; it does not replace tier assignments. |
 | `automaticTitles` | enabled | Set to `false` to disable automatic session titles. Other values do not disable it. |
@@ -69,3 +69,21 @@ OpenAI uses ChatGPT sign-in rather than the `apiKeys.openai` field. OpenRouter r
 | `WSL_DISTRO_NAME`, `WSL_INTEROP` | Either nonempty value selects `clip.exe` for clipboard copying; a Microsoft OS release also triggers WSL detection. |
 
 This table describes environment variables read directly by Xarab's application code, not variables used by Node.js, dependencies, subprocesses or configured MCP servers.
+
+### Worker input budgets
+
+Remote workers reserve 15% of the selected model's advertised context window. If
+context metadata is missing (including for an older saved selection), Xarab
+assumes an 80,000-token window, giving a 68,000-token input budget. Reselect a
+remote model to capture newly discovered metadata. Remote checks conservatively
+charge each serialized UTF-8 byte as one estimated token; this can reject
+requests that would fit the provider's tokenizer. Local workers use the model's
+tokenizer and check the formatted prompt where available. These checks do not
+predict all provider-side overhead.
+
+If older history puts the initial request over budget, Xarab makes one tool-free
+summary attempt using the selected model. It replaces the older history only if
+both summarization and the retried turn succeed. The current prompt is kept
+verbatim. An oversized continuation stops with an error instead of replaying
+completed tools. The summarizer is subject to its own request budget and does not
+chunk the history.
