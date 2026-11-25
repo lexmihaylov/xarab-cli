@@ -4,6 +4,7 @@ import { getLlama, LlamaChatSession } from "node-llama-cpp";
 export function createLocalLlamaWorkerAdapter({
   modelRuntime = { getLlama, createSession: (options) => new LlamaChatSession(options) },
   contextSize = 16384,
+  getContextSize = () => undefined,
   maxTokens = 4096,
 } = {}) {
   let model;
@@ -12,11 +13,17 @@ export function createLocalLlamaWorkerAdapter({
   const lifetime = new AbortController();
   let disposal;
 
-  async function loadContext(modelPath, lane, signal) {
-    const options = { contextSize, flashAttention: true, createSignal: signal };
+  async function loadContext(modelPath, lane, signal, size) {
+    const options = { contextSize: size, flashAttention: true, createSignal: signal };
     if (model?.modelPath === modelPath) {
-      contexts[lane] ??= await model.value.createContext(options);
-      return contexts[lane];
+      if (contexts[lane] && contexts[lane].size !== size) {
+        const previous = contexts[lane];
+        delete contexts[lane];
+        await previous.value.dispose?.();
+        signal.throwIfAborted();
+      }
+      contexts[lane] ??= { value: await model.value.createContext(options), size };
+      return contexts[lane].value;
     }
     await disposeResources();
     signal.throwIfAborted();
@@ -25,7 +32,7 @@ export function createLocalLlamaWorkerAdapter({
     const loadedModel = await llama.loadModel({ modelPath, loadSignal: signal });
     try {
       signal.throwIfAborted();
-      contexts[lane] = await loadedModel.createContext(options);
+      contexts[lane] = { value: await loadedModel.createContext(options), size };
     } catch (error) {
       await Promise.resolve()
         .then(() => loadedModel.dispose?.())
@@ -33,7 +40,7 @@ export function createLocalLlamaWorkerAdapter({
       throw error;
     }
     model = { modelPath, value: loadedModel };
-    return contexts[lane];
+    return contexts[lane].value;
   }
 
   async function disposeResources() {
@@ -44,9 +51,9 @@ export function createLocalLlamaWorkerAdapter({
     model = undefined;
     try {
       try {
-        await validation?.dispose?.();
+        await validation?.value.dispose?.();
       } finally {
-        await primary?.dispose?.();
+        await primary?.value.dispose?.();
       }
     } finally {
       await currentModel?.dispose?.();
@@ -57,6 +64,9 @@ export function createLocalLlamaWorkerAdapter({
     if (lifetime.signal.aborted) throw new Error("Local worker has been disposed.");
     request.signal?.throwIfAborted();
     if (!request.model) throw new Error("A local worker model path is required.");
+    const configuredSize = getContextSize(request.model);
+    const size =
+      Number.isSafeInteger(configuredSize) && configuredSize > 0 ? configuredSize : contextSize;
     if (active[lane] || (lane === "primary" && active.validation))
       throw new Error("Local worker is busy.");
     if (lane === "validation") {
@@ -66,15 +76,17 @@ export function createLocalLlamaWorkerAdapter({
       // reload its weights, or fall back to its sequence from the validation lane.
       if (
         active.primary &&
-        (active.primary.modelPath !== request.model || model?.modelPath !== request.model)
+        (active.primary.modelPath !== request.model ||
+          model?.modelPath !== request.model ||
+          active.primary.size !== size)
       )
         throw new Error("The requested local model is not ready for command validation.");
     }
     const signal = request.signal
       ? AbortSignal.any([request.signal, lifetime.signal])
       : lifetime.signal;
-    const done = Promise.resolve().then(() => generate({ ...request, signal }, lane));
-    active[lane] = { modelPath: request.model, done };
+    const done = Promise.resolve().then(() => generate({ ...request, signal }, lane, size));
+    active[lane] = { modelPath: request.model, size, done };
     try {
       return await done;
     } finally {
@@ -83,11 +95,20 @@ export function createLocalLlamaWorkerAdapter({
   }
 
   async function generate(
-    { model: modelPath, instructions, input, tools = {}, signal, onText = () => {}, onEvent = () => {} },
+    {
+      model: modelPath,
+      instructions,
+      input,
+      tools = {},
+      signal,
+      onText = () => {},
+      onEvent = () => {},
+    },
     lane,
+    size,
   ) {
     signal.throwIfAborted();
-    const context = await loadContext(modelPath, lane, signal);
+    const context = await loadContext(modelPath, lane, signal, size);
     signal.throwIfAborted();
 
     const functions = Object.fromEntries(
@@ -120,7 +141,7 @@ export function createLocalLlamaWorkerAdapter({
       session = modelRuntime.createSession({
         contextSequence,
         systemPrompt: instructions,
-        contextShift: { size: Math.min(6144, Math.floor(contextSize / 2)) },
+        contextShift: { size: Math.min(6144, Math.floor(size / 2)) },
       });
       const { history, prompt } = formatInput(input);
       if (history.length) session.setChatHistory([...session.getChatHistory(), ...history]);

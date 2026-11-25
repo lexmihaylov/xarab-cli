@@ -118,13 +118,20 @@ export function createAssistantController({
     isBusy: () => turnRunning || generating || isRouting || commandRunning || localRuntime.isBusy(),
   });
   const classifyForRouting = routing.classifyForRouting;
-  const localRuntime = createLocalWorkerRuntime(localWorkerAdapterFactory, {
-    unavailableReason: () => {
-      if (isShuttingDown) return "The assistant is shutting down.";
-      if (modelManager.isModelDeletionPending()) return "Wait for local model deletion to finish.";
-      if (changingSingleModel) return "Wait for the model change to finish.";
+  const localRuntime = createLocalWorkerRuntime(
+    () =>
+      localWorkerAdapterFactory({
+        getContextSize: (modelPath) => configStore.getModel?.(modelPath)?.contextSize,
+      }),
+    {
+      unavailableReason: () => {
+        if (isShuttingDown) return "The assistant is shutting down.";
+        if (modelManager.isModelDeletionPending())
+          return "Wait for local model deletion to finish.";
+        if (changingSingleModel) return "Wait for the model change to finish.";
+      },
     },
-  });
+  );
   let sessionController;
   const tasks = createTaskIntegration({
     workspace,

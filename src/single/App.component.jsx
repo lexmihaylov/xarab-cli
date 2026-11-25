@@ -24,6 +24,7 @@ export function App(props) {
         singleModel={state.singleModel}
         onClose={props.onCloseModelModal}
         onSetSingleModel={props.onSetSingleModel}
+        onSetModelContextSize={props.onSetModelContextSize}
         onDeleteModel={props.onDeleteModel}
         onRefreshWorkerModels={props.onRefreshRouterWorkerModels}
       />

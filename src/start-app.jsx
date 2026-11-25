@@ -61,6 +61,7 @@ export async function startApp({ appPolicy, App, releaseInstanceLock }) {
         onCancelModelDownload={controller.cancelModelDownload}
         onSearchHuggingFace={controller.searchHuggingFace}
         onSetSingleModel={controller.setSingleModel}
+        onSetModelContextSize={controller.setModelContextSize}
         onSetRouterClassifier={controller.setRouterClassifier}
         onSetRouterTierWorker={controller.setRouterTierWorker}
         onDeleteModel={controller.deleteModel}

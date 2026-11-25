@@ -9,7 +9,16 @@ function normalizeModelMetadata(value) {
     Object.entries(value).flatMap(([modelPath, settings]) => {
       if (!isRecord(settings)) return [];
       const name = typeof settings.name === "string" ? settings.name.trim() : "";
-      return [[modelPath, name ? { name } : {}]];
+      const contextSize = settings.contextSize;
+      return [
+        [
+          modelPath,
+          {
+            ...(name ? { name } : {}),
+            ...(Number.isSafeInteger(contextSize) && contextSize > 0 ? { contextSize } : {}),
+          },
+        ],
+      ];
     }),
   );
 }
@@ -33,6 +42,17 @@ export function singleSettings(storage) {
         );
       await updateGeneral((general) => {
         general.singleModel = model;
+      });
+    },
+    async setModelContextSize(modelPath, value) {
+      if (value !== undefined && (!Number.isSafeInteger(value) || value <= 0))
+        throw new Error("Context size must be a positive safe integer.");
+      const modelKey = path.resolve(modelPath);
+      await updateGeneral((general) => {
+        if (!isRecord(general.models)) general.models = {};
+        if (!isRecord(general.models[modelKey])) general.models[modelKey] = {};
+        if (value === undefined) delete general.models[modelKey].contextSize;
+        else general.models[modelKey].contextSize = value;
       });
     },
     async ensureModel(modelPath) {

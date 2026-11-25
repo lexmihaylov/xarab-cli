@@ -23,7 +23,7 @@ The following are fields of `~/.xarab/config.json`:
 
 | Field | Default | Meaning |
 | --- | --- | --- |
-| `models` | `{}` | Local model metadata keyed by absolute model path. The recognized metadata field is `name`; other metadata fields are discarded on load. |
+| `models` | `{}` | Local model metadata keyed by absolute model path. Recognized fields are `name` and `contextSize`. For `xarab-one`, `contextSize` is a positive safe integer in tokens; absent or invalid values use 16384. Change it per local model through `/model`, or reset it to the default. Larger contexts require more memory. Other metadata fields are ignored on load. |
 | `apiKeys` | `{}` | Provider keys, including `openrouter` for OpenRouter and `tavily` for web search. `/connect` manages the OpenRouter key. |
 | `openaiModel` | `null` | OpenAI model ID used for worker requests without a tier; it does not replace tier assignments. |
 | `automaticTitles` | enabled | Set to `false` to disable automatic session titles. Other values do not disable it. |

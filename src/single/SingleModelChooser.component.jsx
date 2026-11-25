@@ -9,18 +9,24 @@ const colors = getTheme().colors;
 
 export function SingleModelChooser({
   models = [],
+  modelSettings = {},
   singleModel,
   loadingProviderModels,
   providerModelError,
   error,
   onClose,
   onSetSingleModel,
+  onSetModelContextSize,
   onDeleteModel,
   onRefreshWorkerModels,
 }) {
   const [query, setQuery] = useState("");
   const [index, setIndex] = useState(0);
   const [deleteTarget, setDeleteTarget] = useState(null);
+  const [contextTarget, setContextTarget] = useState(null);
+  const [contextInput, setContextInput] = useState("");
+  const [contextError, setContextError] = useState("");
+  const [savingContext, setSavingContext] = useState(false);
   const scroll = useRef(null);
   const options = models
     .flatMap((model) =>
@@ -37,6 +43,29 @@ export function SingleModelChooser({
     scroll.current?.scrollChildIntoView(`model-${selectedIndex}`);
   }, [selectedIndex]);
   useKeyboard((key) => {
+    if (contextTarget) {
+      if (key.name === "escape") {
+        key.preventDefault();
+        if (!savingContext) setContextTarget(null);
+      } else if (key.name === "return") {
+        key.preventDefault();
+        if (savingContext) return;
+        const text = contextInput.trim();
+        const value = text === "" ? undefined : Number(text);
+        if (text && (!/^\d+$/.test(text) || !Number.isSafeInteger(value) || value <= 0)) {
+          setContextError("Enter a positive safe integer, or leave empty to reset.");
+          return;
+        }
+        setContextError("");
+        setSavingContext(true);
+        Promise.resolve(onSetModelContextSize(contextTarget.model, value))
+          .then((success) => {
+            if (success) setContextTarget(null);
+          })
+          .finally(() => setSavingContext(false));
+      }
+      return;
+    }
     if (deleteTarget) {
       key.preventDefault();
       if (key.name === "return") {
@@ -46,6 +75,17 @@ export function SingleModelChooser({
       return;
     }
     if (
+      key.ctrl &&
+      key.name === "g" &&
+      options[selectedIndex]?.value.provider === "local" &&
+      onSetModelContextSize
+    ) {
+      key.preventDefault();
+      const target = options[selectedIndex].value;
+      setContextTarget(target);
+      setContextInput(modelSettings[target.model]?.contextSize?.toString() ?? "");
+      setContextError("");
+    } else if (
       key.ctrl &&
       key.name === "d" &&
       options[selectedIndex]?.value.provider === "local" &&
@@ -71,9 +111,9 @@ export function SingleModelChooser({
     <Modal
       title="MODEL SELECTION"
       fullScreen
-      dimmed={Boolean(deleteTarget)}
+      dimmed={Boolean(deleteTarget || contextTarget)}
       overlay={
-        deleteTarget && (
+        contextTarget ? (
           <box
             position="absolute"
             top={0}
@@ -85,28 +125,74 @@ export function SingleModelChooser({
             justifyContent="center"
           >
             <box
-              width="58%"
+              width="70%"
               maxWidth={72}
               flexDirection="column"
               backgroundColor={colors.overlay}
               border
               borderStyle="rounded"
-              borderColor={colors.error}
+              borderColor={colors.accent}
               paddingX={2}
               paddingY={1}
             >
-              <text fg={colors.error} bold>
-                DELETE LOCAL MODEL
+              <text fg={colors.accent} bold>
+                LOCAL CONTEXT SIZE
               </text>
-              <text fg={colors.text} marginTop={1} wrapMode="word">
-                Delete {deleteTarget.model.split(/[\\/]/).at(-1)} from local storage? This cannot be
-                undone.
+              <text fg={colors.text} wrapMode="word">
+                {contextTarget.model.split(/[\\/]/).at(-1)}
               </text>
-              <text fg={colors.hint} marginTop={1}>
-                Enter confirm · Esc cancel
-              </text>
+              <text fg={colors.muted}>Positive integer · empty resets to default 16384</text>
+              <input
+                value={contextInput}
+                focused={!savingContext}
+                onInput={setContextInput}
+                placeholder="Default: 16384"
+                width="100%"
+              />
+              {(contextError || error) && (
+                <text fg={colors.error} wrapMode="word">
+                  {contextError || error}
+                </text>
+              )}
+              <text fg={colors.hint}>{savingContext ? "Saving…" : "Enter save · Esc cancel"}</text>
             </box>
           </box>
+        ) : (
+          deleteTarget && (
+            <box
+              position="absolute"
+              top={0}
+              right={0}
+              bottom={0}
+              left={0}
+              zIndex={101}
+              alignItems="center"
+              justifyContent="center"
+            >
+              <box
+                width="58%"
+                maxWidth={72}
+                flexDirection="column"
+                backgroundColor={colors.overlay}
+                border
+                borderStyle="rounded"
+                borderColor={colors.error}
+                paddingX={2}
+                paddingY={1}
+              >
+                <text fg={colors.error} bold>
+                  DELETE LOCAL MODEL
+                </text>
+                <text fg={colors.text} marginTop={1} wrapMode="word">
+                  Delete {deleteTarget.model.split(/[\\/]/).at(-1)} from local storage? This cannot
+                  be undone.
+                </text>
+                <text fg={colors.hint} marginTop={1}>
+                  Enter confirm · Esc cancel
+                </text>
+              </box>
+            </box>
+          )
         )
       }
     >
@@ -128,7 +214,7 @@ export function SingleModelChooser({
           flexShrink={0}
           value={query}
           placeholder="Search models…"
-          focused={!deleteTarget}
+          focused={!deleteTarget && !contextTarget}
           onInput={(value) => {
             setQuery(value);
             setIndex(0);
@@ -172,11 +258,16 @@ export function SingleModelChooser({
           )}
         </scrollbox>
       </box>
+      {options[selectedIndex]?.value.provider === "local" && (
+        <text fg={colors.muted} truncate>
+          {`Context size: ${modelSettings[options[selectedIndex].value.model]?.contextSize ?? "16384 (default)"}`}
+        </text>
+      )}
       <text fg={error || providerModelError ? colors.error : colors.muted} truncate>
         {error || providerModelError || (loadingProviderModels ? "Loading providers…" : " ")}
       </text>
       <text fg={colors.hint} truncate>
-        {`Type to filter · ↑↓ choose · Enter apply · ${options[selectedIndex]?.value.provider === "local" && onDeleteModel ? "Ctrl+D delete · " : ""}Ctrl+R refresh · Esc close`}
+        {`Type to filter · ↑↓ choose · Enter apply · ${options[selectedIndex]?.value.provider === "local" && onSetModelContextSize ? "Ctrl+G context · " : ""}${options[selectedIndex]?.value.provider === "local" && onDeleteModel ? "Ctrl+D delete · " : ""}Ctrl+R refresh · Esc close`}
       </text>
     </Modal>
   );

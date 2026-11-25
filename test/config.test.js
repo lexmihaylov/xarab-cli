@@ -25,7 +25,7 @@ test("loads classifier model labels and ignores obsolete local worker selection"
     );
     const store = createSingleConfigStore(configPath);
     await store.load();
-    assert.deepEqual(store.getModel(modelPath), { name: "My Classifier" });
+    assert.deepEqual(store.getModel(modelPath), { name: "My Classifier", contextSize: 24_576 });
     assert.equal(store.getApiKey("tavily"), "test-key");
 
     assert.equal(store.get().lastModel, undefined);
