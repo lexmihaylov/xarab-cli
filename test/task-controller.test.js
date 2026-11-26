@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
-import { createAssistantController } from "../src/agent/controller.js";
+import { createAssistantController } from "../src/agent/controller/index.js";
 import { createSessionStore } from "../src/agent/session-store.js";
 import { createToolTimelineObserver } from "../src/agent/worker/tool-timeline-observer.js";
 

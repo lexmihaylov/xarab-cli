@@ -9,8 +9,8 @@
   "scripts": {
     "start": "tsx src/tiered/entry.jsx",
     "logo:generate": "node scripts/generate-scarab.js",
-    "format": "prettier --write \"src/**/*.{js,jsx}\" \"test/**/*.js\" \"scripts/**/*.js\"",
-    "format:check": "prettier --check \"src/**/*.{js,jsx}\" \"test/**/*.js\" \"scripts/**/*.js\"",
+    "format": "prettier --write \"src/**/*.{js,jsx,ts,tsx}\" \"test/**/*.js\" \"scripts/**/*.js\"",
+    "format:check": "prettier --check \"src/**/*.{js,jsx,ts,tsx}\" \"test/**/*.js\" \"scripts/**/*.js\"",
     "classifier:evaluate": "node scripts/evaluate-classifier.js",
     "make:install": "node scripts/make-install.js",
     "test": "node --import ./scripts/test-environment.js --import tsx --test \"test/**/*.test.js\"",

@@ -1,7 +1,7 @@
 import React from "react";
 import { ChatShell } from "../../ChatShell.component.jsx";
 import { Composer } from "./Composer.component.jsx";
-import { ModelChooser } from "./ModelChooser.component.jsx";
+import { ModelChooser } from "./ModelChooser/index.tsx";
 
 const welcomeCommands = [
   ["/connect", "Connect a provider"],

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { createActiveWork } from "../src/agent/controller/active-work.js";
 import { createAutoCompactor } from "../src/agent/auto-compactor.js";
 
 function setup(initial, complete) {
@@ -24,9 +25,7 @@ function setup(initial, complete) {
     sessionChanged: () => {},
     notify: () => {},
     updateStatus: () => {},
-    setGenerating: () => {},
-    getAbortController: () => undefined,
-    setAbortController: () => {},
+    activeWork: createActiveWork(),
     isShuttingDown: () => false,
   });
   return {

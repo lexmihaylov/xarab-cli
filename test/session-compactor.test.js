@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { createActiveWork } from "../src/agent/controller/active-work.js";
 import { createSessionCompactor } from "../src/agent/session-compactor.js";
 
 test("compaction transcript includes structured tool calls and results", async () => {
@@ -51,12 +52,9 @@ test("compaction transcript includes structured tool calls and results", async (
     sessionChanged: () => {},
     notify: () => {},
     updateStatus: () => {},
-    isGenerating: () => false,
-    isRouting: () => false,
+    isShuttingDown: () => false,
     isSessionOperation: () => false,
-    setGenerating: () => {},
-    getAbortController: () => undefined,
-    setAbortController: () => {},
+    activeWork: createActiveWork(),
   });
 
   await compactor.compact();
@@ -94,12 +92,9 @@ test("manual compaction retries a timeout and discards the partial attempt", asy
     sessionChanged: () => {},
     notify: () => {},
     updateStatus: (status) => statuses.push(status),
-    isGenerating: () => false,
-    isRouting: () => false,
+    isShuttingDown: () => false,
     isSessionOperation: () => false,
-    setGenerating: () => {},
-    getAbortController: () => undefined,
-    setAbortController: () => {},
+    activeWork: createActiveWork(),
   });
   await compactor.compact();
   assert.equal(calls, 2);

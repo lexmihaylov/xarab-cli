@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import path from "node:path";
-import { createAssistantController } from "../src/agent/controller.js";
+import { createAssistantController } from "../src/agent/controller/index.js";
 import { createToolTimelineObserver } from "../src/agent/worker/tool-timeline-observer.js";
 
 test("tool observer adopts only the preview with the matching call ID", async () => {
@@ -109,4 +109,68 @@ test("controller streams bounded previews, reconciles calls, and settles abandon
   assert.equal(parts[0].callId, "call");
   assert.equal(parts[0].status, "complete");
   assert.equal(parts[1].status, "error");
+});
+
+test("retry settles old previews before new events and does not reuse their call IDs", async (t) => {
+  const temporary = await mkdtemp("/tmp/opencode/xarab-retry-");
+  t.after(() => rm(temporary, { recursive: true, force: true }));
+  let controller;
+  let retrySnapshot;
+  let resumedStatus;
+  controller = createAssistantController({
+    mode: "single",
+    automaticTitles: false,
+    automaticSuggestions: false,
+    root: temporary,
+    workspace: temporary,
+    instructionFiles: [],
+    configPath: path.join(temporary, "config.json"),
+    classifierFactory: () => ({
+      load: async () => {},
+      dispose: async () => {},
+      classify: async () => ({ valid: true, tier: 1, rationale: "Routine" }),
+    }),
+    localWorkerAdapterFactory: () => ({
+      dispose: async () => {},
+      run: async ({ onEvent, tools }) => {
+        onEvent({
+          type: "response.output_item.added",
+          output_index: 0,
+          item: { type: "function_call", id: "old", call_id: "old-call" },
+        });
+        onEvent({ type: "tool_call_delta", itemId: "old", outputIndex: 0, delta: "old" });
+        onEvent({
+          type: "provider_retry",
+          provider: "Test",
+          reason: "empty_response",
+          attempt: 1,
+          maxRetries: 2,
+        });
+        const state = controller.getState();
+        const old = state.messages.find((message) => message.type === "agent").parts[0];
+        retrySnapshot = { status: state.status, toolStatus: old.status, title: old.title };
+        onEvent({ type: "tool_call_started", itemId: "new", outputIndex: 0, name: "list_files" });
+        resumedStatus = controller.getState().status;
+        onEvent({
+          type: "response.completed",
+          response: { output: [{ type: "function_call", id: "new", call_id: "new-call" }] },
+        });
+        await tools.list_files.handler({ path: "." }, { callId: "new-call" });
+      },
+    }),
+  });
+  await controller.initialize();
+  t.after(() => controller.shutdown());
+  await controller.setSingleModel({ provider: "local", model: "small.gguf" });
+  await controller.submit("inspect");
+  const parts = controller.getState().messages.find((message) => message.type === "agent").parts;
+  assert.match(retrySnapshot.status, /was empty; retrying \(1\/2\)/);
+  assert.equal(retrySnapshot.toolStatus, "error");
+  assert.equal(retrySnapshot.title, "Tool call not executed");
+  assert.equal(resumedStatus, "Worker generating…");
+  assert.equal(parts.length, 2);
+  assert.equal(parts[0].callId, "old-call");
+  assert.equal(parts[0].status, "error");
+  assert.equal(parts[1].callId, "new-call");
+  assert.equal(parts[1].status, "complete");
 });

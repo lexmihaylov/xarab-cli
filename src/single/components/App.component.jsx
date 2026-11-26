@@ -2,7 +2,7 @@ import React from "react";
 import { ChatShell } from "../../ChatShell.component.jsx";
 import { Composer } from "./Composer.component.jsx";
 import { SingleModelChooser } from "./SingleModelChooser.component.jsx";
-import { ModelDownloader } from "./ModelDownloader.component.jsx";
+import { ModelDownloader } from "./ModelDownloader/index.tsx";
 
 const welcomeCommands = [
   ["/connect", "Connect a provider"],

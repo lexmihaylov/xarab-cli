@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
-import { createAssistantController } from "../src/agent/controller.js";
+import { createAssistantController } from "../src/agent/controller/index.js";
 import { createSessionStore, newSession } from "../src/agent/session-store.js";
 import { createOpenAIResponsesWorkerAdapter } from "../src/agent/worker/openai-responses-worker-adapter.js";
 

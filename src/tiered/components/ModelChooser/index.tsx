@@ -1,11 +1,13 @@
-import { workerVariants, effortLabel, workerKey } from "../../utils/worker-effort.js";
+import { workerVariants, effortLabel, workerKey } from "../../../utils/worker-effort.js";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useKeyboard, useRenderer, useTerminalDimensions } from "@opentui/react";
-import { getTheme } from "../../utils/theme-engine.js";
+import { getTheme } from "../../../utils/theme-engine.js";
 
 const colors = getTheme().colors;
-import { Modal } from "../../components/Modal.component.jsx";
-import { MarqueeText } from "../../components/MarqueeText.component.jsx";
+import { Modal } from "../../../components/Modal.component.jsx";
+import { RouterPane } from "./RouterPane.component.jsx";
+import { TierPane } from "./TierPane.component.jsx";
+import { WorkerPane } from "./WorkerPane.component.jsx";
 
 function providerLabel(provider) {
   return { local: "Local", openai: "OpenAI", openrouter: "OpenRouter" }[provider] ?? provider;
@@ -247,39 +249,6 @@ export function ModelChooser({
     }
   });
 
-  const pane = (index, title, children, footer) => (
-    <box
-      key={index}
-      flexGrow={1}
-      flexBasis={0}
-      minWidth={0}
-      minHeight={0}
-      flexDirection="column"
-      border
-      borderStyle="rounded"
-      borderColor={activeControl === index ? colors.accent : colors.border}
-      paddingX={1}
-    >
-      <text
-        height={1}
-        flexShrink={0}
-        fg={activeControl === index ? colors.accent : colors.label}
-        bold
-        truncate
-      >
-        {title}
-      </text>
-      {index === 1 && <box height={1} flexShrink={0} />}
-      <box flexGrow={1} flexShrink={1} minHeight={0} overflow="hidden" flexDirection="column">
-        {children}
-      </box>
-      <box height={1} flexShrink={0} overflow="hidden" backgroundColor={colors.overlay}>
-        <text height={1} fg={colors.hint} truncate>
-          {footer}
-        </text>
-      </box>
-    </box>
-  );
 
   return (
     <Modal title="ROUTING & MODEL ASSIGNMENTS" fullScreen>
@@ -303,169 +272,43 @@ export function ModelChooser({
         </text>
       </box>
       <box flexGrow={1} minHeight={0} flexDirection="row" gap={1}>
-        {visible.includes(0) &&
-          pane(
-            0,
-            "01 ROUTER MODEL",
-            <box flexGrow={1} minHeight={0} flexDirection="column">
-              <box flexShrink={0} flexDirection="column">
-                <box height={1} backgroundColor={colors.border} paddingX={1}>
-                  <input
-                    value={routerQuery}
-                    placeholder="Search router models…"
-                    placeholderColor={colors.text}
-                    focused={activeControl === 0}
-                    onInput={setRouterQuery}
-                    width="100%"
-                  />
-                </box>
-              </box>
-              <box height={1} flexShrink={0} />
-              <scrollbox
-                ref={classifierScroll}
-                flexGrow={1}
-                flexShrink={1}
-                minHeight={0}
-                overflow="hidden"
-                scrollY
-                scrollX={false}
-                contentOptions={{ flexDirection: "column" }}
-              >
-                {visibleClassifiers.map((option, index) => {
-                  const selected = activeControl === 0 && index === classifierIndex;
-                  const configured = isClassifierOptionConfigured(option);
-                  return (
-                    <box
-                      key={option.name}
-                      id={`router-${index}`}
-                      flexDirection="column"
-                      flexShrink={0}
-                      minWidth={0}
-                      backgroundColor={selected ? colors.selected : undefined}
-                      paddingX={1}
-                    >
-                      <MarqueeText
-                        fg={
-                          configured ? colors.green : selected ? colors.selectedText : colors.text
-                        }
-                        bold={selected || configured}
-                        active={selected}
-                      >
-                        {`${selected ? "› " : "· "}${option.name}${configured ? " ✓" : ""}`}
-                      </MarqueeText>
-                    </box>
-                  );
-                })}
-                {!visibleClassifiers.length && <text fg={colors.muted}>No matching models</text>}
-              </scrollbox>
-            </box>,
-            loadingClassifier ? "Loading locally…" : "Type to filter · ↑↓ select · Enter next",
-          )}
-        {visible.includes(1) &&
-          pane(
-            1,
-            "02 TIERS",
-            <scrollbox
-              ref={tierScroll}
-              flexGrow={1}
-              minHeight={0}
-              scrollY
-              scrollX={false}
-              contentOptions={{ flexDirection: "column" }}
-            >
-              {[1, 2, 3].map((number) => {
-                const selected = activeControl === 1 && tier === number;
-                const configured = Boolean(tierWorkers[number]?.model || defaultOpenAIModel);
-                return (
-                  <box
-                    key={number}
-                    id={`tier-${number}`}
-                    flexDirection="column"
-                    flexShrink={0}
-                    backgroundColor={selected ? colors.selected : undefined}
-                    paddingX={1}
-                  >
-                    <MarqueeText
-                      fg={configured ? colors.green : selected ? colors.selectedText : colors.text}
-                      bold={selected || configured}
-                      active={selected}
-                    >
-                      {`${selected ? "› " : "· "}Tier ${number} · ${tierWorkers[number]?.model || defaultOpenAIModel || "Not configured"} · ${effortLabel(tierWorkers[number])}`}
-                    </MarqueeText>
-                  </box>
-                );
-              })}
-            </scrollbox>,
-            "↑↓ select · Enter assign",
-          )}
-        {visible.includes(2) &&
-          pane(
-            2,
-            `03 TIER ${tier} WORKER`,
-            workerOptions.length ? (
-              <box flexGrow={1} minHeight={0} flexDirection="column">
-                <box flexShrink={0} flexDirection="column">
-                  <box height={1} backgroundColor={colors.border} paddingX={1}>
-                    <input
-                      value={workerQuery}
-                      placeholder="Search worker models…"
-                      placeholderColor={colors.text}
-                      focused={activeControl === 2}
-                      onInput={setWorkerQuery}
-                      width="100%"
-                    />
-                  </box>
-                </box>
-                <box height={1} flexShrink={0} />
-                <scrollbox
-                  ref={workerScroll}
-                  flexGrow={1}
-                  flexShrink={1}
-                  minHeight={0}
-                  overflow="hidden"
-                  scrollY
-                  scrollX={false}
-                  contentOptions={{ flexDirection: "column" }}
-                >
-                  {visibleWorkers.map((option, index) => {
-                    const selected = activeControl === 2 && index === workerIndex;
-                    const configured =
-                      option.value.provider === configuredWorker?.provider &&
-                      option.value.model === worker &&
-                      option.value.effort === configuredWorker?.effort;
-                    return (
-                      <box
-                        key={workerKey(option.value)}
-                        id={`worker-${index}`}
-                        flexDirection="column"
-                        flexShrink={0}
-                        backgroundColor={selected ? colors.selected : undefined}
-                        paddingX={1}
-                      >
-                        <MarqueeText
-                          fg={
-                            configured ? colors.green : selected ? colors.selectedText : colors.text
-                          }
-                          bold={selected || configured}
-                          active={selected}
-                        >
-                          {`${selected ? "› " : "· "}${option.name}${configured ? " ✓" : ""}`}
-                        </MarqueeText>
-                      </box>
-                    );
-                  })}
-                  {!visibleWorkers.length && <text fg={colors.muted}>No matching models</text>}
-                </scrollbox>
-              </box>
-            ) : (
-              <text fg={colors.muted} wrapMode="word">
-                Connect a provider to choose a worker.
-              </text>
-            ),
-            loadingProviderModels
-              ? "Loading providers…"
-              : providerModelError || "Type to filter · ↑↓ choose · Ctrl+R refresh",
-          )}
+        {visible.includes(0) && (
+          <RouterPane
+            visibleClassifiers={visibleClassifiers}
+            classifierIndex={classifierIndex}
+            isClassifierOptionConfigured={isClassifierOptionConfigured}
+            classifierScroll={classifierScroll}
+            routerQuery={routerQuery}
+            setRouterQuery={setRouterQuery}
+            activeControl={activeControl}
+            loadingClassifier={loadingClassifier}
+          />
+        )}
+        {visible.includes(1) && (
+          <TierPane
+            tier={tier}
+            tierWorkers={tierWorkers}
+            defaultOpenAIModel={defaultOpenAIModel}
+            tierScroll={tierScroll}
+            activeControl={activeControl}
+          />
+        )}
+        {visible.includes(2) && (
+          <WorkerPane
+            tier={tier}
+            workerOptions={workerOptions}
+            visibleWorkers={visibleWorkers}
+            workerIndex={workerIndex}
+            configuredWorker={configuredWorker}
+            worker={worker}
+            workerScroll={workerScroll}
+            workerQuery={workerQuery}
+            setWorkerQuery={setWorkerQuery}
+            activeControl={activeControl}
+            loadingProviderModels={loadingProviderModels}
+            providerModelError={providerModelError}
+          />
+        )}
       </box>
       <text
         height={1}

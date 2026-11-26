@@ -3,7 +3,7 @@ import test from "node:test";
 import React, { act } from "react";
 import { testRender } from "@opentui/react/test-utils";
 import { SingleModelChooser } from "../src/single/components/SingleModelChooser.component.jsx";
-import { ModelChooser } from "../src/tiered/components/ModelChooser.component.jsx";
+import { ModelChooser } from "../src/tiered/components/ModelChooser/index.tsx";
 import { createCommandHandler } from "../src/agent/assistant-command-handler.js";
 
 test("single chooser selects a local model", async () => {

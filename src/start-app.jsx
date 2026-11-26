@@ -5,7 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createCliRenderer } from "@opentui/core";
 import { createRoot } from "@opentui/react";
-import { createAssistantController } from "./agent/controller.js";
+import { createAssistantController } from "./agent/controller/index.js";
 import { loadProjectInstructions } from "./agent/worker/instructions.js";
 import { createMarkdownStyle } from "./utils/markdown-style.js";
 import { createDiagnosticLog } from "./utils/diagnostic-log.js";

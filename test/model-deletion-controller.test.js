@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { createAssistantController } from "../src/agent/controller.js";
+import { createAssistantController } from "../src/agent/controller/index.js";
 
 test("single-mode deletion waits for unload, blocks new work, and clears the selected assignment", async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "xarab-delete-controller-"));

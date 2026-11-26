@@ -13,15 +13,15 @@ export function createSessionCompactor({
   sessionChanged,
   notify,
   updateStatus,
-  isGenerating,
-  isRouting,
+  activeWork,
+  isShuttingDown,
   isSessionOperation,
-  setGenerating,
-  getAbortController,
-  setAbortController,
 }) {
   async function compact() {
-    if (isGenerating() || isRouting() || isSessionOperation()) {
+    if (isShuttingDown()) {
+      return;
+    }
+    if (activeWork.getCurrent() || isSessionOperation()) {
       addMessage({
         type: "system",
         message: "Wait for the current response to finish before compacting the conversation.",
@@ -30,6 +30,11 @@ export function createSessionCompactor({
       return;
     }
 
+    return activeWork.run("manual-compaction", compactConversation);
+  }
+
+  async function compactConversation(operation) {
+    const { signal } = operation;
     const transcript = getMessages()
       .filter(
         (message) =>
@@ -37,10 +42,14 @@ export function createSessionCompactor({
           (message.type === "agent" && (message.message?.trim() || message.parts?.length)),
       )
       .map((message) => {
-        if (message.type === "user") return `User:\n${message.message ?? ""}`;
+        if (message.type === "user") {
+          return `User:\n${message.message ?? ""}`;
+        }
         const sections = [`Assistant:\n${message.message ?? ""}`];
         for (const part of message.parts ?? []) {
-          if (part.type !== "tool") continue;
+          if (part.type !== "tool") {
+            continue;
+          }
           sections.push(
             [
               `Tool call: ${part.toolName ?? "unknown"}${part.callId ? ` (${part.callId})` : ""}`,
@@ -72,7 +81,9 @@ export function createSessionCompactor({
       });
       return;
     }
-    if (route?.cancelled) return;
+    if (route?.cancelled || signal.aborted || isShuttingDown()) {
+      return;
+    }
     if (!route) {
       addMessage({
         type: "system",
@@ -92,14 +103,11 @@ export function createSessionCompactor({
       return;
     }
 
-    const controller = new AbortController();
-    setGenerating(true);
-    setAbortController(controller);
-    updateStatus("Compacting conversation…");
     try {
+      updateStatus("Compacting conversation…");
       const summary = await generateCompactionSummary({
         worker,
-        signal: controller.signal,
+        signal,
         onRetry: ({ attempt, maxRetries }) =>
           updateStatus(`Compaction timed out; retrying (${attempt}/${maxRetries})…`),
         request: {
@@ -109,6 +117,9 @@ export function createSessionCompactor({
           input: [{ role: "user", content: `Conversation to compact:\n\n${transcript}` }],
         },
       });
+      if (signal.aborted || isShuttingDown()) {
+        return;
+      }
       setMessages([
         {
           type: "system",
@@ -121,15 +132,15 @@ export function createSessionCompactor({
       sessionChanged();
       notify();
     } catch (error) {
-      if (!controller.signal.aborted)
+      if (!signal.aborted) {
         addMessage({
           type: "system",
           message: `Compaction failed: ${error.message}`,
           severity: "error",
         });
+      }
     } finally {
-      if (getAbortController() === controller) setAbortController(undefined);
-      setGenerating(false);
+      operation.setGenerating(false);
       updateStatus("Ready");
     }
   }

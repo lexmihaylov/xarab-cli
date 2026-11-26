@@ -14,6 +14,7 @@ export function createSessionController({
   updateStatus,
   isGenerating,
   isRouting,
+  isReplyComplete = () => false,
   getActiveDownload,
   isShuttingDown,
   getSessionPersisted,
@@ -81,7 +82,7 @@ export function createSessionController({
       history: [],
       draft,
       pendingShellContext: getPendingShellContext(),
-      interrupted: isGenerating() || isRouting() || lastTurnInterrupted,
+      interrupted: lastTurnInterrupted || (!isReplyComplete() && (isGenerating() || isRouting())),
       turn: null,
     };
   }

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
-import { createAssistantController } from "../src/agent/controller.js";
+import { createAssistantController } from "../src/agent/controller/index.js";
 
 async function setup(t, downloadFile, onStateChange) {
   const root = await mkdtemp("/tmp/opencode/xarab-download-controller-");

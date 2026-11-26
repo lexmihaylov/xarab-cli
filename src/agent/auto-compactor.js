@@ -13,20 +13,29 @@ export function createAutoCompactor({
   sessionChanged,
   notify,
   updateStatus,
-  setGenerating,
-  getAbortController,
-  setAbortController,
+  activeWork,
   isShuttingDown,
 }) {
-  async function compact() {
+  async function compact(parent) {
+    if (parent?.signal.aborted || isShuttingDown()) {
+      return false;
+    }
+    return activeWork.run("auto-compaction", compactConversation, { parent });
+  }
+
+  async function compactConversation(operation) {
+    const { signal } = operation;
     const messages = getMessages();
     const lastSummary = messages.findLastIndex((message) => message.autoCompactSummary);
     const userIndices = [];
     for (let index = lastSummary + 1; index < messages.length; index++) {
-      if (messages[index].type === "user") userIndices.push(index);
+      if (messages[index].type === "user") {
+        userIndices.push(index);
+      }
     }
-    if (isShuttingDown()) return false;
-    if (!userIndices.length) return false;
+    if (!userIndices.length) {
+      return false;
+    }
 
     const boundary =
       userIndices.length <= AUTO_COMPACT_KEEP_TURNS
@@ -37,10 +46,14 @@ export function createAutoCompactor({
     const transcript = older
       .filter((message) => message.type === "user" || message.type === "agent")
       .map((message) => {
-        if (message.type === "user") return `User:\n${message.message ?? ""}`;
+        if (message.type === "user") {
+          return `User:\n${message.message ?? ""}`;
+        }
         const sections = [`Assistant:\n${message.message ?? ""}`];
         for (const part of message.parts ?? []) {
-          if (part.type !== "tool") continue;
+          if (part.type !== "tool") {
+            continue;
+          }
           sections.push(
             `Tool call: ${part.toolName ?? "unknown"}\nArguments: ${JSON.stringify(part.params ?? {})}\n${part.result ? `Result (${part.result.ok ? "ok" : "error"}): ${part.result.output ?? ""}` : "Result unavailable"}`,
           );
@@ -61,21 +74,23 @@ export function createAutoCompactor({
       });
       return false;
     }
-    if (!route || route.cancelled || !route.worker?.configured || isShuttingDown()) return false;
+    if (
+      !route ||
+      route.cancelled ||
+      !route.worker?.configured ||
+      signal.aborted ||
+      isShuttingDown()
+    ) {
+      return false;
+    }
 
-    const controller = new AbortController();
-    setGenerating(true);
-    setAbortController(controller);
-    updateStatus("Auto-compacting conversation…");
     try {
+      updateStatus("Auto-compacting conversation…");
       const summary = await generateCompactionSummary({
         worker,
-        signal: controller.signal,
-        onRetry: ({ attempt, maxRetries }) => {
-          if (isShuttingDown())
-            controller.abort(new Error("Compaction cancelled during shutdown."));
-          else updateStatus(`Auto-compaction timed out; retrying (${attempt}/${maxRetries})…`);
-        },
+        signal,
+        onRetry: ({ attempt, maxRetries }) =>
+          updateStatus(`Auto-compaction timed out; retrying (${attempt}/${maxRetries})…`),
         request: {
           tier: route.classification?.tier,
           instructions:
@@ -88,8 +103,10 @@ export function createAutoCompactor({
           ],
         },
       });
-      if (controller.signal.aborted || isShuttingDown()) return false;
-      // No new prompts may be accepted while this operation is active.
+      if (signal.aborted || isShuttingDown()) {
+        return false;
+      }
+      // No queued turn may start while this operation is active.
       setMessages([
         {
           type: "agent",
@@ -104,16 +121,16 @@ export function createAutoCompactor({
       notify();
       return true;
     } catch (error) {
-      if (!controller.signal.aborted)
+      if (!signal.aborted) {
         addMessage({
           type: "system",
           message: `Auto-compaction failed: ${error.message}`,
           severity: "error",
         });
+      }
       return false;
     } finally {
-      if (getAbortController() === controller) setAbortController(undefined);
-      setGenerating(false);
+      operation.setGenerating(false);
       updateStatus("Ready");
     }
   }
