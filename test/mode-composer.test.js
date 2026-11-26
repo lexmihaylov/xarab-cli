@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import React, { act } from "react";
 import { testRender } from "@opentui/react/test-utils";
-import { Composer as SingleComposer } from "../src/single/Composer.component.jsx";
-import { Composer as TieredComposer } from "../src/tiered/Composer.component.jsx";
+import { Composer as SingleComposer } from "../src/single/components/Composer.component.jsx";
+import { Composer as TieredComposer } from "../src/tiered/components/Composer.component.jsx";
 
 for (const [name, Composer, present, absent] of [
   ["single", SingleComposer, ["/model", "/download"], ["/route"]],

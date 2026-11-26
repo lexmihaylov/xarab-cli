@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import React, { act } from "react";
 import { testRender } from "@opentui/react/test-utils";
-import { SingleModelChooser } from "../src/single/SingleModelChooser.component.jsx";
-import { createSingleChooserActions } from "../src/single/chooser-actions.js";
+import { SingleModelChooser } from "../src/single/components/SingleModelChooser.component.jsx";
+import { createSingleChooserActions } from "../src/single/utils/chooser-actions.js";
 
 test("context action saves, resets, and reports busy or persistence errors in chooser", async () => {
   let modal = { mode: "chooser", modelSettings: { "/a": { name: "A" } } };

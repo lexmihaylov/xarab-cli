@@ -1,6 +1,6 @@
 import React from "react";
-import { cleanModelText } from "../utils/huggingface-model-formatter.js";
-import { getTheme } from "../utils/theme-engine.js";
+import { cleanModelText } from "../../utils/huggingface-model-formatter.js";
+import { getTheme } from "../../utils/theme-engine.js";
 
 const colors = getTheme().colors;
 

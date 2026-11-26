@@ -1,11 +1,11 @@
-import { workerVariants, effortLabel, workerKey } from "../utils/worker-effort.js";
+import { workerVariants, effortLabel, workerKey } from "../../utils/worker-effort.js";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useKeyboard, useRenderer, useTerminalDimensions } from "@opentui/react";
-import { getTheme } from "../utils/theme-engine.js";
+import { getTheme } from "../../utils/theme-engine.js";
 
 const colors = getTheme().colors;
-import { Modal } from "../components/Modal.component.jsx";
-import { MarqueeText } from "../components/MarqueeText.component.jsx";
+import { Modal } from "../../components/Modal.component.jsx";
+import { MarqueeText } from "../../components/MarqueeText.component.jsx";
 
 function providerLabel(provider) {
   return { local: "Local", openai: "OpenAI", openrouter: "OpenRouter" }[provider] ?? provider;

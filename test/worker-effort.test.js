@@ -4,7 +4,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { workerVariants, effortLabel } from "../src/utils/worker-effort.js";
-import { createTieredConfigStore } from "../src/tiered/config-store.js";
+import { createTieredConfigStore } from "../src/tiered/utils/config-store.js";
 import { buildWorkerHistory } from "../src/agent/worker/worker.js";
 import { restoreMessages } from "../src/agent/session-history.js";
 
@@ -172,7 +172,7 @@ test("remote context metadata is discovered and persisted with tier assignments"
     const loaded = createTieredConfigStore(...args);
     await loaded.load();
     assert.equal(loaded.getTierWorker(1).contextWindow, 64000);
-    const { createSingleConfigStore } = await import("../src/single/config-store.js");
+    const { createSingleConfigStore } = await import("../src/single/utils/config-store.js");
     const singlePath = path.join(dir, "single.json");
     for (const discovered of [...(await ai.listModels()), ...(await router.listModels())]) {
       const configured = createSingleConfigStore(singlePath);

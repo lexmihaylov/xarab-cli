@@ -1,7 +1,7 @@
 import path from "node:path";
-import { createConfigStorage } from "../utils/config-storage.js";
-import { isRecord, normalizeAssignment } from "../utils/config-values.js";
-import { createSharedConfig } from "../utils/shared-config.js";
+import { createConfigStorage } from "../../utils/config-storage.js";
+import { isRecord, normalizeAssignment } from "../../utils/config-values.js";
+import { createSharedConfig } from "../../utils/shared-config.js";
 
 function normalizeModelMetadata(value) {
   if (!isRecord(value)) return {};

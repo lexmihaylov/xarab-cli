@@ -1,7 +1,7 @@
-import { singleAppPolicy } from "./app-policy.js";
+import { singleAppPolicy } from "./utils/app-policy.js";
 import { acquireInstanceLock } from "../instance-lock.js";
 import { startApp } from "../start-app.jsx";
-import { App } from "./App.component.jsx";
+import { App } from "./components/App.component.jsx";
 
 const releaseInstanceLock = await acquireInstanceLock();
 if (!releaseInstanceLock) {

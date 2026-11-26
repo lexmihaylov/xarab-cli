@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { createSingleConfigStore } from "../../../src/single/config-store.js";
+import { createSingleConfigStore } from "../../../src/single/utils/config-store.js";
 import { createLocalLlamaWorkerAdapter } from "../../../src/agent/worker/local-llama-worker-adapter.js";
 
 test("per-model context settings persist, validate, and reset without losing metadata", async () => {

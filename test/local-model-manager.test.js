@@ -4,7 +4,7 @@ import path from "node:path";
 import os from "node:os";
 import test from "node:test";
 import { createModelManager } from "../src/agent/local-model-manager.js";
-import { createSingleConfigStore } from "../src/single/config-store.js";
+import { createSingleConfigStore } from "../src/single/utils/config-store.js";
 
 async function fixture(t) {
   const root = await mkdtemp(path.join(os.tmpdir(), "xarab-models-"));

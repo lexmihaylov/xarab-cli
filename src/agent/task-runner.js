@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { createSingleTaskPolicy } from "../single/task-policy.js";
-import { createTieredTaskPolicy } from "../tiered/task-policy.js";
+import { createSingleTaskPolicy } from "../single/utils/task-policy.js";
+import { createTieredTaskPolicy } from "../tiered/utils/task-policy.js";
 
 const MAX_INPUT = 32 * 1024;
 const MAX_OUTPUT = 16 * 1024;

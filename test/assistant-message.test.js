@@ -3,7 +3,7 @@ import test from "node:test";
 import React, { act, useState } from "react";
 import { testRender } from "@opentui/react/test-utils";
 import { agentTimelineEntries } from "../src/ChatShell.component.jsx";
-import { App } from "../src/single/App.component.jsx";
+import { App } from "../src/single/components/App.component.jsx";
 import { AssistantMessage } from "../src/components/AssistantMessage.component.jsx";
 import { ToolMessage } from "../src/components/ToolMessage.component.jsx";
 import { Welcome } from "../src/components/Welcome.component.jsx";

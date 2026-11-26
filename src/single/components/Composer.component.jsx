@@ -1,5 +1,5 @@
 import React from "react";
-import { Composer as ComposerShell, commandOptions } from "../components/Composer.component.jsx";
+import { Composer as ComposerShell, commandOptions } from "../../components/Composer.component.jsx";
 
 const singleCommands = [
   ...commandOptions.slice(0, 3),

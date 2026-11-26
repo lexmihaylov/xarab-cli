@@ -1,4 +1,4 @@
-import { createOpenRouterClassifierAdapter } from "../agent/classifier/openrouter-classifier-adapter.js";
+import { createOpenRouterClassifierAdapter } from "../../agent/classifier/openrouter-classifier-adapter.js";
 
 export function createTieredRouting({
   configStore,

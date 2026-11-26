@@ -1,6 +1,6 @@
 import { systemPromptFor } from "./worker-prompt.js";
-import { createSingleWorkerPolicy } from "../../single/worker-policy.js";
-import { createTieredWorkerPolicy } from "../../tiered/worker-policy.js";
+import { createSingleWorkerPolicy } from "../../single/utils/worker-policy.js";
+import { createTieredWorkerPolicy } from "../../tiered/utils/worker-policy.js";
 import { createToolRegistry } from "./tool-registry.js";
 import { discoverSkills } from "./skills.js";
 import { createMcpClient } from "./mcp-client.js";

@@ -3,7 +3,7 @@ import test from "node:test";
 import React, { act } from "react";
 import { testRender } from "@opentui/react/test-utils";
 import { ProviderConnections } from "../src/components/ProviderConnections.component.jsx";
-import { ModelChooser } from "../src/tiered/ModelChooser.component.jsx";
+import { ModelChooser } from "../src/tiered/components/ModelChooser.component.jsx";
 import { StatusBar } from "../src/components/StatusBar.component.jsx";
 
 async function render(element, options = { width: 120, height: 30 }) {

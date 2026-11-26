@@ -1,5 +1,5 @@
-import { singleAppPolicy } from "../single/app-policy.js";
-import { tieredAppPolicy } from "../tiered/app-policy.js";
+import { singleAppPolicy } from "../single/utils/app-policy.js";
+import { tieredAppPolicy } from "../tiered/utils/app-policy.js";
 
 export function resolveAppPolicy(mode) {
   if (mode === "single") return singleAppPolicy;

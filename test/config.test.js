@@ -5,8 +5,8 @@ import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { createSingleConfigStore } from "../src/single/config-store.js";
-import { createTieredConfigStore } from "../src/tiered/config-store.js";
+import { createSingleConfigStore } from "../src/single/utils/config-store.js";
+import { createTieredConfigStore } from "../src/tiered/utils/config-store.js";
 
 test("loads classifier model labels and ignores obsolete local worker selection", async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "xarab-config-test-"));
@@ -308,8 +308,8 @@ test(
       }),
     );
 
-    const singleModule = new URL("../src/single/config-store.js", import.meta.url).href;
-    const tieredModule = new URL("../src/tiered/config-store.js", import.meta.url).href;
+    const singleModule = new URL("../src/single/utils/config-store.js", import.meta.url).href;
+    const tieredModule = new URL("../src/tiered/utils/config-store.js", import.meta.url).href;
     const script = `
     import { once } from "node:events";
     import { createSingleConfigStore } from ${JSON.stringify(singleModule)};

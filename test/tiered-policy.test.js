@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createTieredAppPolicy } from "../src/tiered/app-policy.js";
-import { createTieredChooserActions } from "../src/tiered/chooser-actions.js";
-import { createTieredRouting } from "../src/tiered/routing.js";
+import { createTieredAppPolicy } from "../src/tiered/utils/app-policy.js";
+import { createTieredChooserActions } from "../src/tiered/utils/chooser-actions.js";
+import { createTieredRouting } from "../src/tiered/utils/routing.js";
 
 test("tiered policy is remote-only even if legacy options are supplied", () => {
   assert.equal(createTieredAppPolicy({ remoteOnly: false }).remoteOnly, true);

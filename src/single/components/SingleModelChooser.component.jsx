@@ -1,9 +1,9 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useKeyboard } from "@opentui/react";
-import { getTheme } from "../utils/theme-engine.js";
-import { workerVariants, workerKey, effortLabel } from "../utils/worker-effort.js";
-import { Modal } from "../components/Modal.component.jsx";
-import { MarqueeText } from "../components/MarqueeText.component.jsx";
+import { getTheme } from "../../utils/theme-engine.js";
+import { workerVariants, workerKey, effortLabel } from "../../utils/worker-effort.js";
+import { Modal } from "../../components/Modal.component.jsx";
+import { MarqueeText } from "../../components/MarqueeText.component.jsx";
 
 const colors = getTheme().colors;
 

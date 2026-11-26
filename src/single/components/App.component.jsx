@@ -1,5 +1,5 @@
 import React from "react";
-import { ChatShell } from "../ChatShell.component.jsx";
+import { ChatShell } from "../../ChatShell.component.jsx";
 import { Composer } from "./Composer.component.jsx";
 import { SingleModelChooser } from "./SingleModelChooser.component.jsx";
 import { ModelDownloader } from "./ModelDownloader.component.jsx";

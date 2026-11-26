@@ -1,8 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createAssistantController } from "../src/agent/controller.js";
-import { singleAppPolicy } from "../src/single/app-policy.js";
-import { tieredAppPolicy } from "../src/tiered/app-policy.js";
+import { singleAppPolicy } from "../src/single/utils/app-policy.js";
+import { tieredAppPolicy } from "../src/tiered/utils/app-policy.js";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 

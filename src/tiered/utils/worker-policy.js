@@ -1,4 +1,4 @@
-import { createTierAdjustmentTool } from "../agent/worker/tools/tier-adjustment-tool.js";
+import { createTierAdjustmentTool } from "../../agent/worker/tools/tier-adjustment-tool.js";
 
 export function createTieredWorkerPolicy({ configStore }) {
   function getAssignment(tier) {

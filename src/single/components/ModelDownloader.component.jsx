@@ -1,14 +1,14 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useKeyboard, useTerminalDimensions } from "@opentui/react";
-import { useModelDetails } from "../components/hooks/use-model-details.js";
+import { useModelDetails } from "../../components/hooks/use-model-details.js";
 import {
   cleanModelText as clean,
   compactCount,
   modelDetailRows,
-} from "../utils/huggingface-model-formatter.js";
-import { getDimmedColors, getTheme } from "../utils/theme-engine.js";
+} from "../../utils/huggingface-model-formatter.js";
+import { getDimmedColors, getTheme } from "../../utils/theme-engine.js";
 import { DownloadProgressDialog } from "./DownloadProgressDialog.component.jsx";
-import { Modal } from "../components/Modal.component.jsx";
+import { Modal } from "../../components/Modal.component.jsx";
 
 const tabs = ["Overview", "Model card", "Metadata"];
 
