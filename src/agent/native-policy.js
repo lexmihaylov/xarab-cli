@@ -2,6 +2,7 @@ import path from "node:path";
 import { realpath } from "node:fs/promises";
 import { pathAction, strictest } from "./command-policy.js";
 import { confirmPolicyAction } from "./policy-consent.js";
+import { parsePatch } from "./worker/tools/apply-patch-tool.js";
 
 const covered = new Set([
   "read_file",
@@ -9,6 +10,7 @@ const covered = new Set([
   "search_files",
   "search_content",
   "edit",
+  "apply_patch",
   "write",
   "insert_before",
   "insert_after",
@@ -42,6 +44,11 @@ export async function authorizeNativeTool({
   if (!policy) return true;
   const root = await realpath(workspace);
   const targets = [];
+  if (name === "apply_patch") {
+    for (const operation of parsePatch(params.patch)) {
+      targets.push([operation.path, false]);
+    }
+  }
   if (["generate_image", "edit_image"].includes(name)) {
     if (typeof params.folder === "string") targets.push([params.folder, true]);
   }

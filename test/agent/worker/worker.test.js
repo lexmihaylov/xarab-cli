@@ -362,6 +362,12 @@ test("worker history replays tool calls as text with bounded arguments and edit 
       assert.equal(call.arguments.path, "file.js");
       assert.equal(call.arguments.oldString.length, 200);
       assert.equal(call.arguments.newString.length, 200);
+      const oldValue = "large-secret-old-argument".repeat(1000);
+      const newValue = "large-secret-new-argument".repeat(1000);
+      assert.equal(call.arguments.oldString, `${oldValue.slice(0, 100)}…${oldValue.slice(-99)}`);
+      assert.equal(call.arguments.newString, `${newValue.slice(0, 100)}…${newValue.slice(-99)}`);
+      assert.ok(!JSON.stringify(call.arguments).includes(oldValue));
+      assert.ok(!JSON.stringify(call.arguments).includes(newValue));
     }
   }
   assert.match(history[2].output, /Preview shortened/);

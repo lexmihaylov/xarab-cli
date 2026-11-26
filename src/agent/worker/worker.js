@@ -221,7 +221,7 @@ export function createWorker({
   return { run, complete, getTierInfo, dispose };
 }
 
-const EDITING_TOOLS = new Set(["edit", "insert_before", "insert_after", "write"]);
+const EDITING_TOOLS = new Set(["edit", "apply_patch", "insert_before", "insert_after", "write"]);
 const EDIT_ARGUMENT_HISTORY_LIMIT = 200;
 
 function shortenEditArgument(value) {

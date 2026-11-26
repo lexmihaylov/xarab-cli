@@ -113,6 +113,7 @@ export function toolProgressLabel(name, params = {}) {
   if (name === "search_content")
     return `Searching file contents for “${safeToolDetail(params.query)}”`;
   if (name === "edit") return `Editing ${safeToolDetail(params.path)}`;
+  if (name === "apply_patch") return "Applying patch";
   if (name === "insert_before") return `Inserting before anchor in ${safeToolDetail(params.path)}`;
   if (name === "insert_after") return `Inserting after anchor in ${safeToolDetail(params.path)}`;
   if (name === "write") return `Writing ${safeToolDetail(params.path)}`;

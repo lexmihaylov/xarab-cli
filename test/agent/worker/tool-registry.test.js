@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, writeFile, rm, realpath } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile, rm, realpath } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { createToolRegistry } from "../../../src/agent/worker/tool-registry.js";
@@ -74,6 +74,70 @@ test("edit exceptions are stored and replayed as failures", async () => {
   assert.equal(history[1].type, "tool_result");
   assert.equal(history[1].ok, false);
   assert.match(history[1].output, /Status: error/);
+});
+
+test("apply_patch failures are reported as unsuccessful tool results", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "xarab-patch-registry-"));
+  try {
+    await writeFile(path.join(directory, "existing.txt"), "original\n");
+    const agentMessage = { type: "agent", parts: [] };
+    const { tools } = createToolRegistry({
+      workspace: directory,
+      configStore: { getApiKey: () => undefined },
+      onToolEvent: () => {},
+      getMessages: () => [agentMessage],
+      getCurrentAgentMessage: () => agentMessage,
+      sessionChanged: () => {},
+      notify: () => {},
+    });
+
+    const result = await tools.apply_patch.handler({
+      patch:
+        "*** Begin Patch\n*** Update File: existing.txt\n@@\n-wrong\n+changed\n*** End Patch",
+    });
+
+    assert.equal(result.ok, false);
+    assert.match(result.output, /hunk does not match/);
+    assert.equal(agentMessage.parts[0].status, "error");
+    assert.equal(agentMessage.parts[0].result.ok, false);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("apply_patch partial application is reported as unsuccessful", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "xarab-patch-partial-"));
+  try {
+    await writeFile(path.join(directory, "existing.txt"), "original\n");
+    const agentMessage = { type: "agent", parts: [] };
+    const { tools } = createToolRegistry({
+      workspace: directory,
+      configStore: { getApiKey: () => undefined },
+      onToolEvent: async (name, event) => {
+        if (name === "apply_patch" && event.type === "written") {
+          await writeFile(path.join(directory, "existing.txt"), "changed externally\n");
+        }
+      },
+      getMessages: () => [agentMessage],
+      getCurrentAgentMessage: () => agentMessage,
+      sessionChanged: () => {},
+      notify: () => {},
+    });
+
+    const result = await tools.apply_patch.handler({
+      patch:
+        "*** Begin Patch\n*** Add File: added.txt\n+created\n*** Update File: existing.txt\n@@\n-original\n+updated\n*** End Patch",
+    });
+
+    assert.equal(result.ok, false);
+    assert.match(result.output, /file changed since validation/);
+    assert.match(result.output, /Already applied: added.txt/);
+    assert.equal(agentMessage.parts[0].status, "error");
+    assert.equal(agentMessage.parts[0].result.ok, false);
+    assert.equal(await readFile(path.join(directory, "added.txt"), "utf8"), "created\n");
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });
 
 test("skill instructions reach the model but are omitted from the feed and stored result", async () => {

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, symlink, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, symlink, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { authorizeNativeTool } from "../src/agent/native-policy.js";
@@ -43,6 +43,91 @@ test("registered native tools enforce activated policy before accessing content"
     }
   } finally {
     await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("registered apply_patch authorizes every operation before making changes", async (t) => {
+  const patch = [
+    "*** Begin Patch",
+    "*** Update File: update.txt",
+    "@@",
+    "-old",
+    "+new",
+    "*** Add File: added.txt",
+    "+added",
+    "*** Delete File: deleted.txt",
+    "*** End Patch",
+  ].join("\n");
+
+  for (const [target, action, decision] of [
+    ["update.txt", "deny", "Approve"],
+    ["added.txt", "deny", "Approve"],
+    ["deleted.txt", "deny", "Approve"],
+    ["added.txt", "verify", "Deny"],
+    ["deleted.txt", "verify", "Approve"],
+  ]) {
+    await t.test(`${target} ${action} ${decision}`, async () => {
+      const workspace = await mkdtemp(path.join(os.tmpdir(), "patch-policy-"));
+      try {
+        await mkdir(path.join(workspace, ".xarab"));
+        await writeFile(path.join(workspace, "update.txt"), "old\n");
+        await writeFile(path.join(workspace, "deleted.txt"), "delete me\n");
+        await writeFile(
+          path.join(workspace, ".xarab/command-policy.json"),
+          JSON.stringify({ version: 1, files: { [target]: action } }),
+        );
+        const questions = [];
+        const events = [];
+        const { definitions, tools } = createToolRegistry({
+          workspace,
+          onToolEvent: (name, event) => events.push({ name, ...event }),
+          getMessages: () => [],
+          getCurrentAgentMessage: () => undefined,
+          sessionChanged: () => {},
+          notify: () => {},
+          requestQuestions: async ([question]) => {
+            questions.push(question.question);
+            return {
+              cancelled: false,
+              answers: [
+                {
+                  id: "workspace_policy",
+                  choices: [questions.length === 1 ? "Approve" : decision],
+                },
+              ],
+            };
+          },
+        });
+        assert.equal(typeof definitions.apply_patch.handler, "function");
+        assert.equal(typeof tools.apply_patch.handler, "function");
+        const result = await tools.apply_patch.handler({ patch }, { callId: "patch-call" });
+        const approved = action === "verify" && decision === "Approve";
+        assert.equal(result.ok, approved);
+        assert.equal(questions.length, action === "verify" ? 2 : 1);
+        if (action === "verify") {
+          for (const file of ["update.txt", "added.txt", "deleted.txt"]) {
+            assert.ok(questions[1].includes(file));
+          }
+        }
+        if (approved) {
+          assert.equal(await readFile(path.join(workspace, "update.txt"), "utf8"), "new\n");
+          assert.equal(await readFile(path.join(workspace, "added.txt"), "utf8"), "added\n");
+          await assert.rejects(readFile(path.join(workspace, "deleted.txt")), { code: "ENOENT" });
+          assert.ok(
+            events.every((event) => event.name === "apply_patch" && event.callId === "patch-call"),
+          );
+          assert.equal(events.length, 3);
+        } else {
+          assert.match(result.output, /workspace policy/);
+          assert.equal(await readFile(path.join(workspace, "update.txt"), "utf8"), "old\n");
+          assert.equal(await readFile(path.join(workspace, "deleted.txt"), "utf8"), "delete me\n");
+          await assert.rejects(readFile(path.join(workspace, "added.txt")), { code: "ENOENT" });
+          assert.deepEqual(events, []);
+        }
+      } finally {
+        await rm(workspace, { recursive: true, force: true });
+      }
+    });
   }
 });
 

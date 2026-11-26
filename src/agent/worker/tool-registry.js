@@ -8,6 +8,7 @@ import { createListFilesTool } from "./tools/list-files-tool.js";
 import { createSearchFilesTool } from "./tools/search-files-tool.js";
 import { createSearchContentTool } from "./tools/search-content-tool.js";
 import { createEditTool } from "./tools/edit-tool.js";
+import { createApplyPatchTool } from "./tools/apply-patch-tool.js";
 import { createInsertTool } from "./tools/insert-tool.js";
 import { createWriteTool } from "./tools/write-tool.js";
 import { createWebsearchTool } from "./tools/web-search-tool.js";
@@ -62,6 +63,10 @@ export function createToolRegistry({
       onEvent: (event) => emitToolEvent("search_content", event),
     }),
     edit: createEditTool({ workspace, onEvent: (event) => emitToolEvent("edit", event) }),
+    apply_patch: createApplyPatchTool({
+      workspace,
+      onEvent: (event) => emitToolEvent("apply_patch", event),
+    }),
     insert_before: createInsertTool({
       workspace,
       position: "before",

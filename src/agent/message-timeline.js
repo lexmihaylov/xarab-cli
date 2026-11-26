@@ -101,6 +101,10 @@ export function createMessageTimeline({
 
     if (event.type === "tool_call") {
       if (typeof event.callId === "string" && event.callId) part.callId = event.callId;
+    } else if (toolName === "apply_patch" && ["edited", "written", "deleted"].includes(event.type)) {
+      part.title = "Applying patch";
+      const preview = [event.diffText, event.diffNotice].filter(Boolean).join("\n");
+      part.diffText = [part.diffText, preview].filter(Boolean).join("\n").slice(0, 16 * 1024);
     } else if (event.type === "edited") {
       part.title = "File edit";
       part.summary = event.action

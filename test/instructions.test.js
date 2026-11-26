@@ -65,7 +65,7 @@ test("requires research and explicit approval before consequential implementatio
   assert.match(prompt, /wait for an explicit actionable user instruction/);
   assert.match(
     prompt,
-    /Do not use edit, insert_before, insert_after, write, or consequential shell commands before the user explicitly authorizes implementation/,
+    /Do not use edit, apply_patch, insert_before, insert_after, write, or consequential shell commands before the user explicitly authorizes implementation/,
   );
   assert.match(
     prompt,

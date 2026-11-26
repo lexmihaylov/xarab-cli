@@ -70,6 +70,49 @@ test("command output updates only the matching running call", () => {
   assert.equal(parts[1].status, "running");
 });
 
+test("apply_patch accumulates multi-file previews without settling its running call", () => {
+  const parts = [
+    {
+      type: "tool",
+      toolName: "apply_patch",
+      callId: "patch-1",
+      status: "running",
+      title: "Applying patch",
+    },
+  ];
+  const timeline = createMessageTimeline({
+    getMessages: () => [],
+    getCurrentAgentMessage: () => ({ parts }),
+    getActiveSession: () => ({}),
+    sessionChanged: () => {},
+    notify: () => {},
+  });
+
+  timeline.onToolEvent("apply_patch", {
+    type: "edited",
+    callId: "patch-1",
+    path: "first.js",
+    diffText: "--- first.js\n+++ first.js\n+one",
+    diffNotice: "First-file notice",
+  });
+  assert.equal(parts[0].status, "running");
+  assert.equal(parts[0].diffText, "--- first.js\n+++ first.js\n+one\nFirst-file notice");
+
+  timeline.onToolEvent("apply_patch", {
+    type: "written",
+    callId: "patch-1",
+    path: "second.js",
+    diffText: "--- second.js\n+++ second.js\n+two",
+    diffNotice: "Second-file notice",
+  });
+  assert.equal(parts[0].status, "running");
+  assert.equal(
+    parts[0].diffText,
+    "--- first.js\n+++ first.js\n+one\nFirst-file notice\n--- second.js\n+++ second.js\n+two\nSecond-file notice",
+  );
+  assert.equal(parts[0].title, "Applying patch");
+});
+
 test("unmatched success events are ignored while standalone errors remain visible", () => {
   const messages = [];
   const timeline = createMessageTimeline({
